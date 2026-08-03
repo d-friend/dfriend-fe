@@ -1,0 +1,252 @@
+import axios, { AxiosError } from "axios";
+import type {
+  ActivityEvent,
+  ApiErrorEnvelope,
+  AuthUser,
+  ConversationDetail,
+  ConversationSummary,
+  CopilotReportDetail,
+  CopilotReportSummary,
+  CurriculumSubject,
+  ExerciseDocument,
+  StudentInClass,
+  TeacherClass,
+  TeacherRoadmapItem,
+  TeacherStudentMetrics,
+  TeacherSubmission,
+} from "@/types/contracts";
+
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "/api";
+
+function readCookie(name: string) {
+  if (typeof document === "undefined") return null;
+  const row = document.cookie
+    .split(";")
+    .map((item) => item.trim())
+    .find((item) => item.startsWith(`${name}=`));
+  return row ? decodeURIComponent(row.slice(name.length + 1)) : null;
+}
+
+export const apiClient = axios.create({
+  baseURL: API_BASE_URL,
+  withCredentials: true,
+  timeout: 30_000,
+});
+
+apiClient.interceptors.request.use((config) => {
+  const method = config.method?.toUpperCase();
+  if (method && ["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
+    const csrf = readCookie("csrf_token");
+    if (csrf) config.headers["X-CSRF-Token"] = csrf;
+  }
+  return config;
+});
+
+apiClient.interceptors.response.use(
+  (response) => response,
+  (error: AxiosError) => {
+    if (
+      typeof window !== "undefined" &&
+      error.response?.status === 401 &&
+      !window.location.pathname.startsWith("/login")
+    ) {
+      window.location.assign("/login?clear_cookie=1");
+    }
+    return Promise.reject(error);
+  },
+);
+
+export function getApiErrorMessage(error: unknown, fallback = "Không thể hoàn tất yêu cầu.") {
+  if (!axios.isAxiosError<ApiErrorEnvelope>(error)) return fallback;
+  const message = error.response?.data?.message;
+  return Array.isArray(message) ? message.join(" ") : message || fallback;
+}
+
+export const teacherApi = {
+  me: async () => (await apiClient.get<AuthUser>("/auth/me")).data,
+  classes: async () =>
+    (await apiClient.get<{ classes: TeacherClass[] }>("/teacher/classes")).data.classes,
+  createClass: async (payload: { className: string; description: string }) =>
+    (await apiClient.post<TeacherClass>("/teacher/classes", payload)).data,
+  addStudents: async (payload: { classId: string; usernames: string[] }) =>
+    (
+      await apiClient.post<{
+        message: string;
+        added: string[];
+        skipped: string[];
+        notFound: string[];
+      }>("/teacher/classes/add-students", payload)
+    ).data,
+  students: async (classId: string) =>
+    (
+      await apiClient.get<{ students: StudentInClass[] }>(
+        `/teacher/classes/${classId}/students`,
+      )
+    ).data.students,
+  metrics: async (classId: string, studentId: string) =>
+    (
+      await apiClient.get<TeacherStudentMetrics>(
+        `/teacher/classes/${classId}/students/${studentId}/metrics`,
+      )
+    ).data,
+  studentSubmissions: async (classId: string, studentId: string) =>
+    (
+      await apiClient.get<TeacherSubmission[]>(
+        `/teacher/classes/${classId}/students/${studentId}/submissions`,
+      )
+    ).data,
+  studentActivity: async (classId: string, studentId: string) =>
+    (
+      await apiClient.get<{ success: true; data: ActivityEvent[] }>(
+        `/teacher/classes/${classId}/students/${studentId}/activity?limit=30`,
+      )
+    ).data.data,
+  roadmap: async (classId: string) =>
+    (
+      await apiClient.get<TeacherRoadmapItem[]>(
+        `/teacher/classes/${classId}/roadmap`,
+      )
+    ).data,
+  grade: async (submissionId: string, payload: { grade: number; feedback: string }) =>
+    (
+      await apiClient.post<TeacherSubmission>(
+        `/teacher/submissions/${submissionId}/grade`,
+        payload,
+      )
+    ).data,
+  reports: async () =>
+    (await apiClient.get<CopilotReportSummary[]>("/teacher/copilot/reports")).data,
+  report: async (lessonId: string) =>
+    (
+      await apiClient.get<CopilotReportDetail>(
+        `/teacher/copilot/${lessonId}/report`,
+      )
+    ).data,
+  conversations: async () =>
+    (
+      await apiClient.get<{ conversations: ConversationSummary[] }>(
+        "/teacher/copilot/conversations",
+      )
+    ).data.conversations,
+  conversation: async (conversationId: string) =>
+    (
+      await apiClient.get<ConversationDetail>(
+        `/teacher/copilot/conversations/${conversationId}`,
+      )
+    ).data,
+  renameConversation: async (conversationId: string, title: string) =>
+    (
+      await apiClient.patch<ConversationSummary>(
+        `/teacher/copilot/conversations/${conversationId}`,
+        { title },
+      )
+    ).data,
+  deleteConversation: async (conversationId: string) =>
+    apiClient.delete(`/teacher/copilot/conversations/${conversationId}`),
+  curriculum: async () =>
+    (await apiClient.get<{ subjects: CurriculumSubject[] }>("/exercises/curriculum")).data
+      .subjects,
+  documents: async () =>
+    (
+      await apiClient.get<{ documents: ExerciseDocument[] }>(
+        "/exercises/documents/mine",
+      )
+    ).data.documents,
+  uploadDocument: async (body: FormData) =>
+    (
+      await apiClient.post<{ message: string; documentId: string; previewUrl: string }>(
+        "/exercises/upload",
+        body,
+        { timeout: 120_000 },
+      )
+    ).data,
+  deleteDocument: async (documentId: string) =>
+    apiClient.delete(`/exercises/documents/${documentId}`),
+  precheckLesson: async (payload: {
+    lessonGoal: string;
+    title: string;
+    subject: string;
+    topic: string;
+    concept: string;
+  }) =>
+    (
+      await apiClient.post<Record<string, unknown>>(
+        "/exercises/create-lesson/precheck",
+        payload,
+        { timeout: 60_000 },
+      )
+    ).data,
+  generateLesson1: async (body: FormData) =>
+    (
+      await apiClient.post<Record<string, unknown>>(
+        "/exercises/create-lesson/lesson1",
+        body,
+        { timeout: 360_000 },
+      )
+    ).data,
+  generateLesson2: async (body: FormData) =>
+    (
+      await apiClient.post<Record<string, unknown>>(
+        "/exercises/create-lesson/lesson2",
+        body,
+        { timeout: 180_000 },
+      )
+    ).data,
+  publishWizardDraft: async (
+    draftExerciseId: string,
+    payload: { classIds: string[]; deadline?: string },
+  ) =>
+    (
+      await apiClient.patch<Record<string, unknown>>(
+        `/exercises/${draftExerciseId}`,
+        payload,
+      )
+    ).data,
+  copilotDraft: async (lessonId: string) =>
+    (
+      await apiClient.get<Record<string, unknown>>(
+        `/teacher/copilot/drafts/${lessonId}`,
+      )
+    ).data,
+  approveGenerated: async (lessonId: string) =>
+    (
+      await apiClient.post<Record<string, unknown>>(
+        `/exercises/ai-drafts/${lessonId}/approve-generated`,
+      )
+    ).data,
+  publishCopilotDraft: async (
+    lessonId: string,
+    payload: { classIds: string[]; deadline?: string; title?: string },
+  ) =>
+    (
+      await apiClient.post<Record<string, unknown>>(
+        `/exercises/ai-drafts/${lessonId}/publish`,
+        payload,
+      )
+    ).data,
+  publishFollowUpDraft: async (aiLessonId: string) =>
+    (
+      await apiClient.post<Record<string, unknown>>(
+        `/teacher/copilot/extra-exercises/${aiLessonId}/publish`,
+      )
+    ).data,
+  generateFollowUps: async (lessonId: string) =>
+    (
+      await apiClient.post<{
+        created: boolean;
+        reason?: string;
+        lessonTitle?: string;
+        classNames?: string;
+        drafts?: Array<{
+          id: string;
+          groupType: "remedial" | "advanced";
+          studentIds: string[];
+          exercises: Array<Record<string, unknown>>;
+          summary: string;
+          aiLessonId: string;
+        }>;
+      }>(`/teacher/copilot/${lessonId}/extra-exercises`, undefined, {
+        timeout: 360_000,
+      })
+    ).data,
+};
