@@ -1,6 +1,7 @@
 import { apiClient } from "@/lib/api-client";
 import type {
   AuthUser,
+  SessionOneProgress,
   StudentAssignment,
   StudentClass,
   StudentExercise,
@@ -20,6 +21,8 @@ export const studentKeys = {
   classmates: (studentId: string, classId: string) =>
     ["student", "classmates", studentId, classId] as const,
   exercise: (exerciseId: string) => ["student", "exercise", exerciseId] as const,
+  sessionOneProgress: (exerciseId: string) =>
+    ["student", "session-one-progress", exerciseId] as const,
   activeSession: (lessonId: string) => ["student", "session", lessonId] as const,
   report: (lessonId: string) => ["student", "report", lessonId] as const,
 };
@@ -44,6 +47,25 @@ export const studentApi = {
     (await apiClient.get<StudentRoadmapItem[]>(`/student/classes/${classId}/roadmap`)).data,
   exercise: async (exerciseId: string) =>
     (await apiClient.get<StudentExercise>(`/student/exercises/${exerciseId}`)).data,
+  sessionOneProgress: async (exerciseId: string) =>
+    (
+      await apiClient.get<SessionOneProgress>(
+        `/student/lessons/${exerciseId}/session-one-progress`,
+      )
+    ).data,
+  saveSessionOneProgress: async (
+    exerciseId: string,
+    progress: Pick<
+      SessionOneProgress,
+      "completedItems" | "attemptedQuestions" | "answers"
+    >,
+  ) =>
+    (
+      await apiClient.patch<SessionOneProgress>(
+        `/student/lessons/${exerciseId}/session-one-progress`,
+        progress,
+      )
+    ).data,
   activeSession: async (lessonId: string) =>
     (await apiClient.get<StudySession>(`/ai-session/active/${lessonId}`)).data,
   startSession: async (lessonId: string, reset = false) =>

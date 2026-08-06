@@ -1,4 +1,5 @@
 import { API_BASE_URL } from "@/lib/api-client";
+import { consumeJsonSse } from "@/lib/sse";
 
 export type StudyStreamEvent =
   | { type: "token"; content: string }
@@ -52,22 +53,10 @@ export async function streamStudyBuddy(
     throw new Error(body?.message || "Study Buddy chưa thể phản hồi.");
   }
 
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const frames = buffer.split("\n\n");
-    buffer = frames.pop() || "";
-    for (const frame of frames) {
-      const data = frame
-        .split("\n")
-        .filter((line) => line.startsWith("data:"))
-        .map((line) => line.slice(5).trim())
-        .join("\n");
-      if (data) onEvent(JSON.parse(data) as StudyStreamEvent);
-    }
-  }
+  let terminal = false;
+  await consumeJsonSse<StudyStreamEvent>(response, (event) => {
+    if (event.type === "done" || event.type === "error") terminal = true;
+    onEvent(event);
+  });
+  if (!terminal) throw new Error("Kết nối Study Buddy kết thúc trước khi lưu tiến độ.");
 }

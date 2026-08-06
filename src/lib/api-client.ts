@@ -5,6 +5,8 @@ import type {
   AuthUser,
   ConversationDetail,
   ConversationSummary,
+  CopilotChatResponse,
+  CopilotDraft,
   CopilotReportDetail,
   CopilotReportSummary,
   CurriculumSubject,
@@ -134,6 +136,26 @@ export const teacherApi = {
         `/teacher/copilot/conversations/${conversationId}`,
       )
     ).data,
+  chatCopilot: async (
+    payload: { message: string; conversation_id?: string | null; class_id?: string | null },
+    signal?: AbortSignal,
+  ) =>
+    (
+      await apiClient.post<CopilotChatResponse>("/teacher/copilot/chat", payload, {
+        signal,
+        timeout: 360_000,
+      })
+    ).data,
+  confirmCopilotPlan: async (
+    payload: { classId: string; goalText: string; conceptKey: string; skillIds: string[]; allowGenerated?: boolean },
+  ) =>
+    (
+      await apiClient.post<CopilotDraft & { success: boolean }>(
+        "/teacher/copilot/lesson-plan/confirm",
+        payload,
+        { timeout: 360_000 },
+      )
+    ).data,
   renameConversation: async (conversationId: string, title: string) =>
     (
       await apiClient.patch<ConversationSummary>(
@@ -212,6 +234,29 @@ export const teacherApi = {
     (
       await apiClient.post<Record<string, unknown>>(
         `/exercises/ai-drafts/${lessonId}/approve-generated`,
+      )
+    ).data,
+  approveLessonReview: async (lessonId: string) =>
+    (
+      await apiClient.post<Record<string, unknown>>(
+        `/exercises/ai-drafts/${lessonId}/review/approve`,
+      )
+    ).data,
+  reopenLessonReview: async (lessonId: string) =>
+    (
+      await apiClient.post<Record<string, unknown>>(
+        `/exercises/ai-drafts/${lessonId}/review/reopen`,
+      )
+    ).data,
+  regenerateLessonReview: async (
+    lessonId: string,
+    targets: Array<{ kind: "mastery" | "knowledge_checkpoint"; id?: string; index?: number }>,
+  ) =>
+    (
+      await apiClient.post<Record<string, unknown>>(
+        `/exercises/ai-drafts/${lessonId}/review/regenerate`,
+        { targets },
+        { timeout: 360_000 },
       )
     ).data,
   publishCopilotDraft: async (

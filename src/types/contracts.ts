@@ -89,6 +89,7 @@ export interface CopilotTurn {
   created_at?: string;
   steps?: CopilotStep[];
   drafts?: CopilotDraft[];
+  plans?: CopilotLessonPlan[];
 }
 
 export interface ConversationDetail extends ConversationSummary {
@@ -108,13 +109,42 @@ export interface CopilotDraft {
   problemCount: number;
 }
 
+export interface CopilotPlanSkill {
+  skillId: string;
+  label: string;
+  selected: boolean;
+  evidence?: string | null;
+}
+
+export interface CopilotLessonPlan {
+  goalText: string;
+  conceptKey: string;
+  subjectLabel: string;
+  topicLabel: string;
+  conceptLabel: string;
+  verdict: string;
+  detail: string;
+  skills: CopilotPlanSkill[];
+  bankProblems: number;
+  documentUnits: number;
+  confirmable: boolean;
+}
+
+export interface CopilotChatResponse {
+  conversation_id: string;
+  response: string;
+  steps?: CopilotStep[];
+  drafts?: CopilotDraft[];
+  plans?: CopilotLessonPlan[];
+}
+
 export interface CopilotReportSummary {
   lessonId: string;
   title: string;
   subject: string;
   topic: string;
   classNames: string;
-  classIds?: string[];
+  classIds: string[];
   status: "PENDING" | "ANALYSING" | "REPORT_READY" | "FAILED";
   reportedAt: string | null;
   acknowledgedAt: string | null;
@@ -200,6 +230,9 @@ export interface StudentAssignment {
   due_date: string;
   status: "TODO" | "DONE" | "OVERDUE";
   class_id: string;
+  session1_completed_items?: number[];
+  session1_item_count?: number;
+  session1_completed_at?: string | null;
 }
 
 export interface StudentRoadmapItem {
@@ -212,6 +245,7 @@ export interface StudentRoadmapItem {
     summary: string;
     exercises: Array<{ problem_id?: number; question?: string }>;
   }>;
+  extra_completed?: boolean;
 }
 
 export interface LessonOneKnowledgeItem {
@@ -232,6 +266,15 @@ export interface LessonOneQuestion {
   explanation?: string;
   knowledgeItemIndex?: number | null;
   knowledge_item_index?: number | null;
+}
+
+export interface SessionOneProgress {
+  completedItems: number[];
+  attemptedQuestions: string[];
+  answers: Record<string, string>;
+  itemCount: number;
+  completedAt: string | null;
+  updatedAt: string | null;
 }
 
 export interface StudentExercise {

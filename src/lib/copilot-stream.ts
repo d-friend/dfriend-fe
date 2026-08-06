@@ -1,11 +1,13 @@
 import { API_BASE_URL } from "@/lib/api-client";
-import type { CopilotDraft, CopilotStep } from "@/types/contracts";
+import type { CopilotDraft, CopilotLessonPlan, CopilotStep } from "@/types/contracts";
+import { consumeJsonSse } from "@/lib/sse";
 
 export type CopilotStreamEvent =
   | { type: "conversation"; conversation_id: string }
   | { type: "step"; step: CopilotStep }
   | { type: "delta"; delta: string }
   | { type: "draft"; draft: CopilotDraft }
+  | { type: "plan"; plan: CopilotLessonPlan }
   | { type: "done" }
   | { type: "error"; message: string };
 
@@ -41,23 +43,10 @@ export async function streamCopilot(
     throw new Error(body?.message || "Copilot chưa thể phản hồi. Vui lòng thử lại.");
   }
 
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const frames = buffer.split("\n\n");
-    buffer = frames.pop() || "";
-    for (const frame of frames) {
-      const data = frame
-        .split("\n")
-        .filter((line) => line.startsWith("data:"))
-        .map((line) => line.slice(5).trim())
-        .join("\n");
-      if (!data) continue;
-      onEvent(JSON.parse(data) as CopilotStreamEvent);
-    }
-  }
+  let terminal = false;
+  await consumeJsonSse<CopilotStreamEvent>(response, (event) => {
+    if (event.type === "done" || event.type === "error") terminal = true;
+    onEvent(event);
+  });
+  if (!terminal) throw new Error("Kết nối Copilot kết thúc trước khi hoàn tất phản hồi.");
 }

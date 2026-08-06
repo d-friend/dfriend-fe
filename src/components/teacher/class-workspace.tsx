@@ -41,7 +41,16 @@ export function ClassWorkspace({ classId }: { classId: string }) {
   const classesQuery = useQuery({ queryKey: ["teacher", "classes"], queryFn: teacherApi.classes });
   const studentsQuery = useQuery({ queryKey: ["teacher", "classes", classId, "students"], queryFn: () => teacherApi.students(classId) });
   const roadmapQuery = useQuery({ queryKey: ["teacher", "classes", classId, "roadmap"], queryFn: () => teacherApi.roadmap(classId) });
-  const reportsQuery = useQuery({ queryKey: ["teacher", "copilot", "reports"], queryFn: teacherApi.reports });
+  const reportsQuery = useQuery({
+    queryKey: ["teacher", "copilot", "reports"],
+    queryFn: teacherApi.reports,
+    refetchInterval: (query) =>
+      (query.state.data || []).some((report) =>
+        ["PENDING", "ANALYSING"].includes(report.status),
+      )
+        ? 8_000
+        : false,
+  });
 
   const currentClass = classesQuery.data?.find((item) => item.class_id === classId);
   const classReports = useMemo(() => {

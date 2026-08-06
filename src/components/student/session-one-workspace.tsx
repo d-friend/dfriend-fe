@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   ArrowRight,
@@ -11,12 +12,11 @@ import {
   ReadCvLogo,
   XCircle,
 } from "@phosphor-icons/react";
-import ReactMarkdown from "react-markdown";
-import rehypeKatex from "rehype-katex";
-import remarkMath from "remark-math";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { MathContent } from "@/components/shared/math-content";
+import { getApiErrorMessage } from "@/lib/api-client";
+import { canonicalAnswer } from "@/lib/answer-normalization";
 import { studentApi, studentKeys } from "@/lib/student-api";
-import { normalizeMathMarkdown } from "@/lib/math-markdown";
 import type { LessonOneKnowledgeItem, LessonOneQuestion } from "@/types/contracts";
 
 type ProgressState = {
@@ -34,39 +34,75 @@ const emptyProgress: ProgressState = {
 };
 
 export function SessionOneWorkspace({ exerciseId }: { exerciseId: string }) {
+  const router = useRouter();
   const exerciseQuery = useQuery({
     queryKey: studentKeys.exercise(exerciseId),
     queryFn: () => studentApi.exercise(exerciseId),
   });
   const meQuery = useQuery({ queryKey: studentKeys.me, queryFn: studentApi.me });
+  const progressQuery = useQuery({
+    queryKey: studentKeys.sessionOneProgress(exerciseId),
+    queryFn: () => studentApi.sessionOneProgress(exerciseId),
+    enabled: Boolean(meQuery.data?.id),
+    retry: 1,
+  });
   const [progress, setProgress] = useState<ProgressState>(emptyProgress);
   const [activeIndex, setActiveIndex] = useState(0);
   const [ready, setReady] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncError, setSyncError] = useState("");
 
   const storageKey = meQuery.data?.id ? `dfriend:s1:${meQuery.data.id}:${exerciseId}` : "";
   useEffect(() => {
-    if (!storageKey) return;
+    if (!storageKey || !progressQuery.isFetched) return;
     const timer = window.setTimeout(() => {
       try {
         const stored = JSON.parse(localStorage.getItem(storageKey) || "{}") as Partial<ProgressState>;
+        const remote = progressQuery.data;
         setProgress({
-          completedItems: Array.isArray(stored.completedItems) ? stored.completedItems : [],
-          attemptedQuestions: Array.isArray(stored.attemptedQuestions) ? stored.attemptedQuestions : [],
-          answers: stored.answers || {},
+          completedItems: Array.from(new Set([
+            ...(remote?.completedItems || []),
+            ...(Array.isArray(stored.completedItems) ? stored.completedItems : []),
+          ])),
+          attemptedQuestions: Array.from(new Set([
+            ...(remote?.attemptedQuestions || []),
+            ...(Array.isArray(stored.attemptedQuestions) ? stored.attemptedQuestions : []),
+          ])),
+          answers: { ...(remote?.answers || {}), ...(stored.answers || {}) },
           lastOpenedAt: new Date().toISOString(),
         });
       } catch {
-        setProgress({ ...emptyProgress, lastOpenedAt: new Date().toISOString() });
+        setProgress({
+          ...emptyProgress,
+          completedItems: progressQuery.data?.completedItems || [],
+          attemptedQuestions: progressQuery.data?.attemptedQuestions || [],
+          answers: progressQuery.data?.answers || {},
+          lastOpenedAt: new Date().toISOString(),
+        });
+      }
+      if (progressQuery.isError) {
+        setSyncError("Chưa đồng bộ được tiến độ với máy chủ.");
       }
       setReady(true);
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [storageKey]);
+  }, [progressQuery.data, progressQuery.isError, progressQuery.isFetched, storageKey]);
 
   useEffect(() => {
     if (!storageKey || !ready) return;
     localStorage.setItem(storageKey, JSON.stringify(progress));
-  }, [progress, ready, storageKey]);
+    const timer = window.setTimeout(() => {
+      void studentApi
+        .saveSessionOneProgress(exerciseId, progress)
+        .then(() => setSyncError(""))
+        .catch((error) =>
+          setSyncError(
+            getApiErrorMessage(error, "Chưa lưu được tiến độ lên máy chủ."),
+          ),
+        );
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [exerciseId, progress, ready, storageKey]);
 
   const items = useMemo<LessonOneKnowledgeItem[]>(() => {
     const source = exerciseQuery.data?.lesson1Knowledge?.items;
@@ -101,6 +137,23 @@ export function SessionOneWorkspace({ exerciseId }: { exerciseId: string }) {
     if (activeIndex < items.length - 1) setActiveIndex(activeIndex + 1);
   }
 
+  async function openSessionTwo() {
+    setSyncing(true);
+    setSyncError("");
+    try {
+      await studentApi.saveSessionOneProgress(exerciseId, progress);
+      router.push(`/student/lesson/${exerciseId}/part2`);
+    } catch (error) {
+      setSyncError(
+        getApiErrorMessage(
+          error,
+          "Chưa xác nhận được Session 1. Tiến độ trên máy vẫn được giữ.",
+        ),
+      );
+      setSyncing(false);
+    }
+  }
+
   return (
     <div className="learning-shell session-one-shell">
       <header className="learning-header">
@@ -126,14 +179,14 @@ export function SessionOneWorkspace({ exerciseId }: { exerciseId: string }) {
           <div className="knowledge-scroll">
             <article className="knowledge-content">
               <div className="knowledge-content-heading"><span>Phần {String(activeIndex + 1).padStart(2, "0")}</span><h1>{item?.title || "Nền tảng bài học"}</h1>{completed && <p className="review-badge"><CheckCircle size={17} weight="fill" /> Đã hoàn thành, đang xem lại</p>}</div>
-              {activeIndex === 0 && exerciseQuery.data.lesson1Knowledge?.hook && <div className="knowledge-hook"><strong>Đặt vấn đề</strong><p>{exerciseQuery.data.lesson1Knowledge.hook}</p></div>}
-              <div className="markdown-body"><ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{normalizeMathMarkdown(item?.content || "Nội dung đang được cập nhật.")}</ReactMarkdown></div>
+              {activeIndex === 0 && exerciseQuery.data.lesson1Knowledge?.hook && <div className="knowledge-hook"><strong>Đặt vấn đề</strong><MathContent>{exerciseQuery.data.lesson1Knowledge.hook}</MathContent></div>}
+              <MathContent>{item?.content || "Nội dung đang được cập nhật."}</MathContent>
               {questions.length ? <section className="checkpoint-section"><div><span>Kiểm tra nhanh</span><h2>Thử trước khi sang phần tiếp</h2><p>Chỉ cần trả lời. Bạn không cần đúng ngay lần đầu.</p></div>{questions.map((question, index) => <Checkpoint key={questionId(question, activeIndex, index)} question={question} id={questionId(question, activeIndex, index)} answer={progress.answers[questionId(question, activeIndex, index)] || ""} attempted={progress.attemptedQuestions.includes(questionId(question, activeIndex, index))} onAnswer={(answer) => setProgress((current) => ({ ...current, answers: { ...current.answers, [questionId(question, activeIndex, index)]: answer } }))} onAttempt={() => setProgress((current) => ({ ...current, attemptedQuestions: Array.from(new Set([...current.attemptedQuestions, questionId(question, activeIndex, index)])) }))} />)}</section> : <div className="knowledge-acknowledge"><CheckCircle size={22} /><div><strong>Bạn đã đọc phần này?</strong><span>Đánh dấu hoàn thành để mở nội dung tiếp theo.</span></div></div>}
             </article>
           </div>
           <footer className="knowledge-actions">
-            <span>{questions.length && !allAttempted && !completed ? `Còn ${questions.length - progress.attemptedQuestions.filter((id) => id.startsWith(`${activeIndex}:`)).length} câu cần thử` : completed ? "Phần này đã được lưu" : "Sẵn sàng mở phần tiếp theo"}</span>
-            {allComplete ? <Link className="student-primary-button" href={`/student/lesson/${exerciseId}/part2`}>Sang Session 2 <ArrowRight size={17} /></Link> : completed && nextIndex >= 0 ? <button className="student-primary-button" onClick={() => setActiveIndex(nextIndex)}>Phần tiếp theo <ArrowRight size={17} /></button> : <button className="student-primary-button" onClick={completeItem} disabled={questions.length > 0 && !allAttempted}>Hoàn thành phần <ArrowRight size={17} /></button>}
+            <span>{syncError || (questions.length && !allAttempted && !completed ? `Còn ${questions.length - progress.attemptedQuestions.filter((id) => id.startsWith(`${activeIndex}:`)).length} câu cần thử` : completed ? "Phần này đã được lưu" : "Sẵn sàng mở phần tiếp theo")}</span>
+            {allComplete ? <button className="student-primary-button" onClick={() => void openSessionTwo()} disabled={syncing}>{syncing ? "Đang đồng bộ" : "Sang Session 2"} <ArrowRight size={17} /></button> : completed && nextIndex >= 0 ? <button className="student-primary-button" onClick={() => setActiveIndex(nextIndex)}>Phần tiếp theo <ArrowRight size={17} /></button> : <button className="student-primary-button" onClick={completeItem} disabled={questions.length > 0 && !allAttempted}>Hoàn thành phần <ArrowRight size={17} /></button>}
           </footer>
         </main>
       </div>
@@ -144,12 +197,13 @@ export function SessionOneWorkspace({ exerciseId }: { exerciseId: string }) {
 function Checkpoint({ question, id, answer, attempted, onAnswer, onAttempt }: { question: LessonOneQuestion; id: string; answer: string; attempted: boolean; onAnswer: (value: string) => void; onAttempt: () => void }) {
   const [localError, setLocalError] = useState("");
   const options = (question.options || []).map((option, index) => typeof option === "string" ? { label: String.fromCharCode(65 + index), text: option } : { label: option.label || String.fromCharCode(65 + index), text: option.text || "" });
-  const expected = String(question.correctAnswer ?? question.answer ?? "").trim().toLocaleLowerCase("vi");
+  const expected = canonicalAnswer(String(question.correctAnswer ?? question.answer ?? ""));
   const selectedOption = options.find((option) => option.label.toLocaleLowerCase("vi") === answer.toLocaleLowerCase("vi"));
-  const actual = (selectedOption?.text || answer).trim().toLocaleLowerCase("vi");
-  const correct = attempted && expected ? actual === expected || answer.trim().toLocaleLowerCase("vi") === expected : null;
+  const actual = canonicalAnswer(selectedOption?.text || answer);
+  const selectedLabel = canonicalAnswer(answer);
+  const correct = attempted && expected ? actual === expected || selectedLabel === expected : null;
   function submit(event: FormEvent) { event.preventDefault(); if (!answer.trim()) { setLocalError("Chọn hoặc nhập một câu trả lời trước."); return; } setLocalError(""); onAttempt(); }
-  return <form className="checkpoint-card" onSubmit={submit}><div className="markdown-body checkpoint-question"><ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{normalizeMathMarkdown(question.questionText || question.question || "Câu hỏi kiểm tra")}</ReactMarkdown></div>{options.length ? <div className="checkpoint-options">{options.map((option) => <label key={option.label} data-selected={answer === option.label}><input type="radio" name={id} value={option.label} checked={answer === option.label} onChange={(event) => onAnswer(event.target.value)} disabled={attempted} /><span>{option.label}</span><strong>{option.text}</strong></label>)}</div> : <div className="student-field"><label htmlFor={id}>Câu trả lời của bạn</label><input id={id} value={answer} onChange={(event) => onAnswer(event.target.value)} disabled={attempted} /></div>}{localError && <p className="student-form-error" role="alert">{localError}</p>}{attempted ? <div className={correct ? "checkpoint-feedback correct" : "checkpoint-feedback retry"}>{correct ? <CheckCircle size={21} weight="fill" /> : <XCircle size={21} weight="fill" />}<div><strong>{correct ? "Chính xác" : "Chưa đúng, nhưng bạn đã thử"}</strong><span>{question.explanation || (correct ? "Bạn đã nắm phần này." : "Đọc lại lời giải thích rồi tiếp tục khi sẵn sàng.")}</span></div></div> : <button className="student-secondary-button" type="submit">Kiểm tra</button>}</form>;
+  return <form className="checkpoint-card" onSubmit={submit}><MathContent className="checkpoint-question">{question.questionText || question.question || "Câu hỏi kiểm tra"}</MathContent>{options.length ? <div className="checkpoint-options">{options.map((option) => <label key={option.label} data-selected={answer === option.label}><input type="radio" name={id} value={option.label} checked={answer === option.label} onChange={(event) => onAnswer(event.target.value)} disabled={attempted} /><span>{option.label}</span><MathContent className="checkpoint-option" answer>{option.text}</MathContent></label>)}</div> : <div className="student-field"><label htmlFor={id}>Câu trả lời của bạn</label><input id={id} value={answer} onChange={(event) => onAnswer(event.target.value)} disabled={attempted} /></div>}{localError && <p className="student-form-error" role="alert">{localError}</p>}{attempted ? <div className={correct ? "checkpoint-feedback correct" : "checkpoint-feedback retry"}>{correct ? <CheckCircle size={21} weight="fill" /> : <XCircle size={21} weight="fill" />}<div><strong>{correct ? "Chính xác" : "Chưa đúng, nhưng bạn đã thử"}</strong><MathContent className="checkpoint-explanation">{question.explanation || (correct ? "Bạn đã nắm phần này." : "Đọc lại lời giải thích rồi tiếp tục khi sẵn sàng.")}</MathContent></div></div> : <button className="student-secondary-button" type="submit">Kiểm tra</button>}</form>;
 }
 
 function questionsForItem(questions: LessonOneQuestion[], itemIndex: number, itemCount: number) { const assigned = questions.filter((question) => (question.knowledgeItemIndex ?? question.knowledge_item_index) === itemIndex); if (assigned.length) return assigned; const hasBindings = questions.some((question) => typeof (question.knowledgeItemIndex ?? question.knowledge_item_index) === "number"); if (hasBindings) return []; return itemCount === 1 ? questions : questions.filter((_, index) => index % itemCount === itemIndex); }

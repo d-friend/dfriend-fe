@@ -27,6 +27,25 @@ function readLessonProgress(userId: string | undefined, exerciseId: string): Sto
   }
 }
 
+function assignmentProgress(
+  assignment: StudentAssignment,
+  userId: string | undefined,
+  hydrated: boolean,
+): StoredProgress {
+  const local = hydrated
+    ? readLessonProgress(userId, assignment.assignment_id)
+    : {};
+  return {
+    ...local,
+    completedItems: Array.from(
+      new Set([
+        ...(assignment.session1_completed_items || []),
+        ...(local.completedItems || []),
+      ]),
+    ),
+  };
+}
+
 export function TodayDashboard() {
   const reduceMotion = useReducedMotion();
   const hydrated = useSyncExternalStore(() => () => undefined, () => true, () => false);
@@ -57,12 +76,8 @@ export function TodayDashboard() {
   }, [roadmaps]);
   const assignments = useMemo(() => {
     return [...(assignmentsQuery.data || [])].sort((a, b) => {
-      const aProgress = hydrated
-        ? readLessonProgress(meQuery.data?.id, a.assignment_id).completedItems?.length || 0
-        : 0;
-      const bProgress = hydrated
-        ? readLessonProgress(meQuery.data?.id, b.assignment_id).completedItems?.length || 0
-        : 0;
+      const aProgress = assignmentProgress(a, meQuery.data?.id, hydrated).completedItems?.length || 0;
+      const bProgress = assignmentProgress(b, meQuery.data?.id, hydrated).completedItems?.length || 0;
       const aOverdue = new Date(a.due_date).getTime() < now || a.status === "OVERDUE";
       const bOverdue = new Date(b.due_date).getTime() < now || b.status === "OVERDUE";
       if (aOverdue !== bOverdue) return aOverdue ? -1 : 1;
@@ -70,6 +85,27 @@ export function TodayDashboard() {
       return new Date(a.due_date).getTime() - new Date(b.due_date).getTime();
     });
   }, [assignmentsQuery.data, hydrated, meQuery.data?.id, now]);
+  const followUps = useMemo(
+    () =>
+      roadmaps.flatMap((query, classIndex) =>
+        (query.data || [])
+          .filter(
+            (item) =>
+              Boolean(item.extra_exercises?.length) && !item.extra_completed,
+          )
+          .map((item) => ({
+            lessonId: item.lessonId,
+            title: item.title,
+            className:
+              classesQuery.data?.[classIndex]?.class_name || "Lớp học",
+            exerciseCount: (item.extra_exercises || []).reduce(
+              (count, group) => count + group.exercises.length,
+              0,
+            ),
+          })),
+      ),
+    [classesQuery.data, roadmaps],
+  );
 
   const isLoading = meQuery.isLoading || classesQuery.isLoading || assignmentsQuery.isLoading;
   const hasPartialError =
@@ -96,7 +132,7 @@ export function TodayDashboard() {
           <strong>{classesQuery.data?.length || 0}</strong>
           <span>lớp đang tham gia</span>
           <i />
-          <strong>{assignments.length}</strong>
+          <strong>{assignments.length + followUps.length}</strong>
           <span>bài đang mở</span>
         </div>
       </motion.section>
@@ -151,16 +187,19 @@ export function TodayDashboard() {
             <p>Dùng mã lớp giáo viên gửi để nhận bài học và lộ trình của bạn.</p>
             <Link className="student-primary-button" href="/student/classes?join=1">Nhập mã lớp</Link>
           </div>
-        ) : assignments.length ? (
+        ) : assignments.length || followUps.length ? (
           <div className="lesson-grid">
+            {followUps.map((followUp, index) => (
+              <FollowUpCard key={followUp.lessonId} {...followUp} index={index} />
+            ))}
             {assignments.map((assignment, index) => (
               <LessonCard
                 key={assignment.assignment_id}
                 assignment={assignment}
                 className={classMap.get(assignment.class_id)?.class_name || "Lớp học"}
-                progress={hydrated ? readLessonProgress(meQuery.data?.id, assignment.assignment_id) : {}}
+                progress={assignmentProgress(assignment, meQuery.data?.id, hydrated)}
                 roadmap={roadmapMap.get(assignment.assignment_id)}
-                index={index}
+                index={index + followUps.length}
                 now={now}
               />
             ))}
@@ -175,6 +214,23 @@ export function TodayDashboard() {
         )}
       </section>
     </div>
+  );
+}
+
+function FollowUpCard({ lessonId, title, className, exerciseCount, index }: { lessonId: string; title: string; className: string; exerciseCount: number; index: number }) {
+  const reduceMotion = useReducedMotion();
+  return (
+    <motion.article
+      className="lesson-card follow-up-card"
+      initial={reduceMotion ? false : { opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: index * 0.04, duration: 0.25 }}
+    >
+      <div className="lesson-card-meta"><span>{className}</span><span className="deadline"><Lightning size={15} weight="fill" /> Bài theo feedback</span></div>
+      <div className="lesson-card-copy"><h3>Luyện thêm: {title}</h3><p>Giáo viên đã gửi một chặng luyện tập dựa trên kết quả bài vừa rồi.</p></div>
+      <div className="lesson-card-progress"><Compass size={18} /><div><strong>{exerciseCount} bài được chọn cho bạn</strong><span>Bắt đầu ngay với Study Buddy, không cần học lại Session 1.</span></div></div>
+      <Link className="student-primary-button" href={`/student/lesson/extra_${lessonId}/part2`}>Bắt đầu luyện thêm <ArrowRight size={17} /></Link>
+    </motion.article>
   );
 }
 
@@ -217,7 +273,7 @@ function LessonCard({
       </div>
       <div className="lesson-card-copy">
         <h3>{assignment.title}</h3>
-        <p>{assignment.description || "Nắm nền tảng, luyện từng bước và nhận phản hồi sau bài học."}</p>
+        <p>{lessonTeaser(assignment.description)}</p>
       </div>
       <div className="lesson-card-progress">
         <Lightning size={18} weight={started ? "fill" : "regular"} />
@@ -236,6 +292,36 @@ function LessonCard({
 function formatScore(value: number) {
   const normalized = value > 10 ? value / 10 : value;
   return Number.isInteger(normalized) ? String(normalized) : normalized.toFixed(1);
+}
+
+function lessonTeaser(value: string | null | undefined) {
+  const fallback = "Nắm nền tảng, luyện từng bước và nhận phản hồi sau bài học.";
+  if (!value?.trim()) return fallback;
+
+  // Lesson descriptions can contain the complete generated Markdown document.
+  // A dashboard card needs a preview, not the entire lesson dumped into one <p>.
+  // Prefer the hook, then strip presentation syntax and cap at two short sentences.
+  const hook = value.match(
+    /##\s*(?:Đặt vấn đề|Mở đầu)\s*([\s\S]*?)(?=\n#{1,3}\s|$)/i,
+  )?.[1];
+  const plain = (hook || value)
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/\$\$([\s\S]*?)\$\$/g, "$1")
+    .replace(/\$([^$]+)\$/g, "$1")
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/^\s{0,3}#{1,6}\s+/gm, "")
+    .replace(/^\s*(?:[-*+]|\d+\.)\s+/gm, "")
+    .replace(/[>*_`~|]/g, " ")
+    .replace(/\\(?:left|right|quad|,|;|!)/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!plain) return fallback;
+  const sentencePreview = plain.match(/^.*?[.!?](?:\s+.*?[.!?])?/u)?.[0] || plain;
+  if (sentencePreview.length <= 210) return sentencePreview;
+  const clipped = sentencePreview.slice(0, 210).replace(/\s+\S*$/, "").trim();
+  return `${clipped}…`;
 }
 
 function deadlineCopy(date: string, overdue: boolean, now: number) {

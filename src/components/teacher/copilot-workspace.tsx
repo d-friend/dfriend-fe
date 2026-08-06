@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowUp,
+  BookOpenText,
+  Check,
   CheckCircle,
   CircleNotch,
   Copy,
@@ -17,12 +19,10 @@ import {
 } from "@phosphor-icons/react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import ReactMarkdown from "react-markdown";
-import rehypeKatex from "rehype-katex";
-import remarkMath from "remark-math";
+import { MathContent } from "@/components/shared/math-content";
 import { getApiErrorMessage, teacherApi } from "@/lib/api-client";
 import { streamCopilot } from "@/lib/copilot-stream";
-import type { CopilotDraft, CopilotStep, CopilotTurn } from "@/types/contracts";
+import type { CopilotDraft, CopilotLessonPlan, CopilotStep, CopilotTurn } from "@/types/contracts";
 
 const suggestions = [
   "Tóm tắt lớp nào cần mình chú ý hôm nay?",
@@ -111,47 +111,40 @@ export function CopilotWorkspace({ conversationId }: { conversationId?: string }
 
     const controller = new AbortController();
     abortRef.current = controller;
-    let resolvedConversation = activeConversationId;
     try {
+      let resolvedConversation = activeConversationId;
+      let streamError = "";
       await streamCopilot(
         { message: content, conversation_id: activeConversationId || null, class_id: classId || null },
         (streamEvent) => {
           if (streamEvent.type === "conversation") {
             resolvedConversation = streamEvent.conversation_id;
-            setActiveConversationId(streamEvent.conversation_id);
+            setActiveConversationId(resolvedConversation);
+            return;
           }
-          if (streamEvent.type === "step") {
-            setTurns((current) =>
-              current.map((turn) =>
-                turn.id === assistantId
-                  ? { ...turn, steps: mergeStep(turn.steps || [], streamEvent.step) }
-                  : turn,
-              ),
-            );
-          }
-          if (streamEvent.type === "delta") {
-            setTurns((current) =>
-              current.map((turn) =>
-                turn.id === assistantId
-                  ? { ...turn, content: turn.content + streamEvent.delta }
-                  : turn,
-              ),
-            );
-          }
-          if (streamEvent.type === "draft") {
-            setTurns((current) =>
-              current.map((turn) =>
-                turn.id === assistantId
-                  ? { ...turn, drafts: [...(turn.drafts || []), streamEvent.draft] }
-                  : turn,
-              ),
-            );
-          }
-          if (streamEvent.type === "error") throw new Error(streamEvent.message);
+          setTurns((current) => current.map((turn) => {
+            if (turn.id !== assistantId) return turn;
+            if (streamEvent.type === "delta") return { ...turn, content: `${turn.content}${streamEvent.delta}` };
+            if (streamEvent.type === "step") {
+              const steps = [...(turn.steps || [])];
+              const existing = steps.findIndex((step) => step.label === streamEvent.step.label && step.status === "started");
+              if (existing >= 0 && streamEvent.step.status !== "started") steps[existing] = streamEvent.step;
+              else steps.push(streamEvent.step);
+              return { ...turn, steps };
+            }
+            if (streamEvent.type === "draft") return { ...turn, drafts: [...(turn.drafts || []), streamEvent.draft] };
+            if (streamEvent.type === "plan") return { ...turn, plans: [...(turn.plans || []), streamEvent.plan] };
+            if (streamEvent.type === "done") return { ...turn, pending: false };
+            if (streamEvent.type === "error") {
+              streamError = streamEvent.message;
+              return { ...turn, pending: false, error: streamEvent.message };
+            }
+            return turn;
+          }));
         },
         controller.signal,
       );
-      setTurns((current) => current.map((turn) => (turn.id === assistantId ? { ...turn, pending: false } : turn)));
+      if (streamError) throw new Error(streamError);
       await queryClient.invalidateQueries({ queryKey: ["teacher", "copilot", "conversations"] });
       if (!conversationId && resolvedConversation) {
         router.replace(`/teacher/copilot/${resolvedConversation}`);
@@ -243,7 +236,7 @@ export function CopilotWorkspace({ conversationId }: { conversationId?: string }
         ) : (
           <div className="message-stack">
             <AnimatePresence initial={false}>
-              {turns.map((turn) => <MessageBubble key={turn.id} turn={turn} />)}
+              {turns.map((turn) => <MessageBubble key={turn.id} turn={turn} classId={classId} />)}
             </AnimatePresence>
             <div ref={bottomRef} />
           </div>
@@ -290,7 +283,7 @@ function EmptyCopilot({ onSuggestion }: { onSuggestion: (value: string) => void 
   );
 }
 
-function MessageBubble({ turn }: { turn: DisplayTurn }) {
+function MessageBubble({ turn, classId }: { turn: DisplayTurn; classId: string }) {
   const [copied, setCopied] = useState(false);
   const reduceMotion = useReducedMotion();
   return (
@@ -303,10 +296,11 @@ function MessageBubble({ turn }: { turn: DisplayTurn }) {
       <div className="message-role">{turn.role === "user" ? "Bạn" : "D-Friend Copilot"}</div>
       {turn.steps?.length ? <ToolSteps steps={turn.steps} /> : null}
       {turn.content ? (
-        <div className="markdown-body"><ReactMarkdown remarkPlugins={[remarkMath]} rehypePlugins={[rehypeKatex]}>{turn.content}</ReactMarkdown></div>
+        <MathContent>{turn.content}</MathContent>
       ) : turn.pending ? (
         <div className="thinking-line"><CircleNotch className="animate-spin" size={16} /> Đang suy nghĩ</div>
       ) : null}
+      {turn.plans?.map((plan, index) => <LessonPlanCard key={`${plan.conceptKey}:${index}`} plan={plan} classId={classId} />)}
       {turn.drafts?.map((draft) => <DraftCard key={draft.lessonId} draft={draft} />)}
       {turn.error && <p className="message-error"><WarningCircle size={16} /> {turn.error}</p>}
       {turn.role === "assistant" && turn.content && (
@@ -316,6 +310,103 @@ function MessageBubble({ turn }: { turn: DisplayTurn }) {
       )}
     </motion.article>
   );
+}
+
+function LessonPlanCard({ plan, classId }: { plan: CopilotLessonPlan; classId: string }) {
+  const router = useRouter();
+  const [selected, setSelected] = useState(() => new Set(plan.skills.filter((skill) => skill.selected).map((skill) => skill.skillId)));
+  const [draft, setDraft] = useState<CopilotDraft | null>(null);
+  const startsWithoutMaterial = plan.verdict === "no_material" || (plan.bankProblems === 0 && plan.documentUnits === 0);
+  const [requiresGenerationConsent, setRequiresGenerationConsent] = useState(startsWithoutMaterial);
+  const [consentDetail, setConsentDetail] = useState(startsWithoutMaterial ? plan.detail : "");
+  const confirm = useMutation({
+    mutationFn: (allowGenerated: boolean) => teacherApi.confirmCopilotPlan({
+      classId,
+      goalText: plan.goalText,
+      conceptKey: plan.conceptKey,
+      skillIds: Array.from(selected),
+      allowGenerated,
+    }),
+    onSuccess: (result) => {
+      setDraft(result);
+      if (result.lessonId) router.push(`/teacher/lessons/${result.lessonId}/review`);
+    },
+    onError: (mutationError) => {
+      const requirement = generationConsentRequirement(mutationError);
+      if (!requirement) return;
+      setRequiresGenerationConsent(true);
+      setConsentDetail(requirement);
+    },
+  });
+
+  if (draft) return <DraftCard draft={draft} />;
+
+  return (
+    <section className="lesson-plan-card" aria-label="Xác nhận kế hoạch bài học">
+      <header>
+        <span><BookOpenText size={18} weight="fill" /></span>
+        <div className="lesson-plan-breadcrumb">
+          <strong>{plan.subjectLabel}</strong><i>›</i><strong>{plan.topicLabel}</strong><i>›</i><strong>{plan.conceptLabel}</strong>
+        </div>
+      </header>
+      <p className="lesson-plan-detail">{plan.detail}</p>
+      <fieldset>
+        <legend>Kỹ năng trong bài</legend>
+        <div className="lesson-plan-skills">
+          {plan.skills.map((skill) => (
+            <label key={skill.skillId} data-selected={selected.has(skill.skillId)}>
+              <input
+                type="checkbox"
+                checked={selected.has(skill.skillId)}
+                onChange={(event) => setSelected((current) => {
+                  const next = new Set(current);
+                  if (event.target.checked) next.add(skill.skillId); else next.delete(skill.skillId);
+                  // The previous material verdict described the previous selection.
+                  // Let the server recheck these edited boxes before asking for
+                  // generation consent again.
+                  setRequiresGenerationConsent(false);
+                  setConsentDetail("");
+                  return next;
+                })}
+              />
+              <span><strong>{skill.label}</strong>{skill.evidence ? <em>từ chỗ bạn viết “{skill.evidence}”</em> : null}</span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
+      <div className="lesson-plan-footer">
+        <p>Ngân hàng: {plan.bankProblems} bài <i>·</i> Tài liệu: {plan.documentUnits} phần</p>
+        {plan.confirmable === true && (
+          <button
+            className="primary-button"
+            onClick={() => confirm.mutate(requiresGenerationConsent)}
+            disabled={confirm.isPending || selected.size === 0 || !classId}
+            title={!classId ? "Chọn một lớp ở mục Ngữ cảnh trước khi soạn bài" : undefined}
+          >
+            {confirm.isPending ? <CircleNotch className="animate-spin" size={16} /> : <Check size={16} weight="bold" />}
+            {confirm.isPending ? "Đang soạn bài" : requiresGenerationConsent ? "Cho phép AI soạn phần thiếu" : "Đúng rồi, soạn bài"}
+          </button>
+        )}
+      </div>
+      {requiresGenerationConsent && <p className="lesson-plan-consent"><WarningCircle size={16} /> {consentDetail || "Một số kỹ năng chưa có nguồn bài. AI chỉ soạn phần thiếu sau khi bạn xác nhận."}</p>}
+      {plan.confirmable === true && !classId && <p className="lesson-plan-hint">Chọn một lớp ở mục Ngữ cảnh để tiếp tục.</p>}
+      {confirm.isError && !generationConsentRequirement(confirm.error) && <p className="message-error"><WarningCircle size={16} /> {getApiErrorMessage(confirm.error, "Chưa thể tạo bản nháp từ kế hoạch này.")}</p>}
+    </section>
+  );
+}
+
+function generationConsentRequirement(error: unknown) {
+  const axiosResponse = (error as { response?: { status?: number; data?: unknown } })?.response;
+  const response = axiosResponse?.data;
+  if (!response || typeof response !== "object" || Array.isArray(response)) return "";
+  const body = response as Record<string, unknown>;
+  const message = typeof body.message === "string" ? body.message : "";
+  const explicitCode = body.code === "GENERATION_CONSENT_REQUIRED";
+  // Compatibility with older Nest deployments whose exception filter stripped the
+  // structured code. This endpoint uses 409 specifically for generation consent.
+  const legacyConsent = axiosResponse?.status === 409 && /xác nhận|AI soạn phần còn thiếu/i.test(message);
+  if (!explicitCode && !legacyConsent) return "";
+  return message || "Một số kỹ năng đã chọn chưa có nguồn bài.";
 }
 
 function ToolSteps({ steps }: { steps: CopilotStep[] }) {
@@ -343,12 +434,4 @@ function DraftCard({ draft }: { draft: CopilotDraft }) {
 
 function CopilotSkeleton() {
   return <div className="copilot-workspace"><div className="copilot-header"><div><div className="skeleton h-3 w-20 mb-2" /><div className="skeleton h-7 w-56" /></div></div><div className="message-stack pt-12"><div className="skeleton h-24 w-[70%]" /><div className="skeleton h-32 w-[82%] ml-auto" /></div></div>;
-}
-
-function mergeStep(current: CopilotStep[], next: CopilotStep) {
-  const index = current.findIndex((item) => item.label === next.label && item.status === "started");
-  if (index === -1) return [...current, next];
-  const copy = [...current];
-  copy[index] = next;
-  return copy;
 }
