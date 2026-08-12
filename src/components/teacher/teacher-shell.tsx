@@ -17,8 +17,20 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { useMemo, useState, type FormEvent, type ReactNode } from "react";
-import { apiClient, getApiErrorMessage, teacherApi } from "@/lib/api-client";
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import type { Socket } from "socket.io-client";
+import { API_BASE_URL, apiClient, getApiErrorMessage, teacherApi } from "@/lib/api-client";
+import type { CopilotReportSummary } from "@/types/contracts";
+
+type TeacherNotification = {
+  recipientId?: string;
+  title: string;
+  message: string;
+  type?: string;
+  lessonId?: string;
+  path?: string;
+  createdAt?: string;
+};
 
 export function TeacherShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -32,6 +44,10 @@ export function TeacherShell({ children }: { children: ReactNode }) {
   const [className, setClassName] = useState("");
   const [description, setDescription] = useState("");
   const [classError, setClassError] = useState("");
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [liveNotifications, setLiveNotifications] = useState<TeacherNotification[]>([]);
+  const [openedReportIds, setOpenedReportIds] = useState<string[]>([]);
+  const [toast, setToast] = useState<TeacherNotification | null>(null);
 
   const copilotMode = pathname.startsWith("/teacher/copilot") || pathname.startsWith("/teacher/documents");
   const fixedMain = pathname.startsWith("/teacher/copilot");
@@ -47,6 +63,67 @@ export function TeacherShell({ children }: { children: ReactNode }) {
     enabled: copilotMode,
   });
   const meQuery = useQuery({ queryKey: ["auth", "me"], queryFn: teacherApi.me });
+  const reportsQuery = useQuery({
+    queryKey: ["teacher", "copilot", "reports"],
+    queryFn: teacherApi.reports,
+    refetchInterval: (query) =>
+      (query.state.data || []).some((report) => ["PENDING", "ANALYSING"].includes(report.status))
+        ? 8_000
+        : 60_000,
+  });
+
+  const recoveredNotifications = useMemo(
+    () => (reportsQuery.data || [])
+      .filter((report) => report.status === "REPORT_READY" && !report.acknowledgedAt)
+      .filter((report) => !openedReportIds.includes(report.lessonId))
+      .map(reportNotification),
+    [openedReportIds, reportsQuery.data],
+  );
+  const notifications = useMemo(
+    () => mergeNotifications(recoveredNotifications, liveNotifications),
+    [liveNotifications, recoveredNotifications],
+  );
+  const unreadCount = notifications.length;
+
+  useEffect(() => {
+    if (!meQuery.data?.id) return;
+    let cancelled = false;
+    let socket: Socket | null = null;
+
+    async function connectNotifications() {
+      const { io } = await import("socket.io-client");
+      if (cancelled) return;
+
+      socket = io(`${getNotificationOrigin()}/notifications`, {
+        auth: getNotificationAuth(),
+        withCredentials: true,
+        transports: ["websocket", "polling"],
+      });
+
+      socket.on("notification", (payload) => {
+        const notification = normalizeNotification(payload);
+        if (!notification) return;
+
+        setLiveNotifications((current) => mergeNotifications([notification], current));
+        setToast(notification);
+        window.setTimeout(() => setToast(null), 8_000);
+
+        if (notification.type === "COPILOT_REPORT_READY" || notification.type === "COPILOT_REPORT_FAILED") {
+          queryClient.invalidateQueries({ queryKey: ["teacher", "copilot", "reports"] });
+          if (notification.lessonId) {
+            queryClient.invalidateQueries({ queryKey: ["teacher", "copilot", notification.lessonId, "report"] });
+          }
+        }
+      });
+    }
+
+    connectNotifications().catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+      socket?.disconnect();
+    };
+  }, [meQuery.data?.id, queryClient]);
 
   const createClass = useMutation({
     mutationFn: teacherApi.createClass,
@@ -97,6 +174,19 @@ export function TeacherShell({ children }: { children: ReactNode }) {
     createClass.mutate({ className: className.trim(), description: description.trim() });
   }
 
+  function openNotification(notification: TeacherNotification) {
+    setNotificationsOpen(false);
+    setLiveNotifications((current) => current.filter((item) => notificationKey(item) !== notificationKey(notification)));
+    setToast(null);
+    if (notification.type === "COPILOT_REPORT_READY" && notification.lessonId) {
+      void teacherApi.dismissCopilotReport(notification.lessonId).then(() => {
+        setOpenedReportIds((current) => current.includes(notification.lessonId!) ? current : [...current, notification.lessonId!]);
+        return queryClient.invalidateQueries({ queryKey: ["teacher", "copilot", "reports"] });
+      });
+    }
+    if (notification.path?.startsWith("/")) router.push(notification.path);
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -123,9 +213,35 @@ export function TeacherShell({ children }: { children: ReactNode }) {
           <button className="icon-button mobile-menu-button" onClick={() => setMobileOpen((value) => !value)} aria-label="Mở thanh điều hướng" aria-expanded={mobileOpen}>
             <SidebarSimple size={19} />
           </button>
-          <button className="icon-button" aria-label="Thông báo">
-            <Bell size={18} />
-          </button>
+          <div className="notification-wrap">
+            <button className="icon-button notification-button" aria-label="Thông báo" aria-haspopup="menu" aria-expanded={notificationsOpen} onClick={() => setNotificationsOpen((value) => !value)}>
+              <Bell size={18} />
+              {unreadCount > 0 && <span className="notification-dot">{unreadCount}</span>}
+            </button>
+            <AnimatePresence>
+              {notificationsOpen && (
+                <motion.div className="notification-menu" role="menu" initial={reduceMotion ? false : { opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.16 }}>
+                  <div className="notification-menu-header">
+                    <strong>Thông báo</strong>
+                    <span>{notifications.length ? `${notifications.length} gần nhất` : "Realtime"}</span>
+                  </div>
+                  {notifications.length ? (
+                    notifications.map((notification) => (
+                      <button key={notificationKey(notification)} role="menuitem" onClick={() => openNotification(notification)}>
+                        <span>
+                          <strong>{notification.title}</strong>
+                          <small>{notification.message}</small>
+                        </span>
+                        <time>{formatNotificationTime(notification.createdAt)}</time>
+                      </button>
+                    ))
+                  ) : (
+                    <p>Chưa có thông báo mới.</p>
+                  )}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
           <div className="account-menu-wrap">
             <button className="avatar-button" aria-label="Tài khoản giáo viên" aria-haspopup="menu" aria-expanded={accountOpen} onClick={() => { setAccountOpen((value) => !value); setLogoutError(""); }}>
               <span className="avatar">{initials}</span>
@@ -184,6 +300,26 @@ export function TeacherShell({ children }: { children: ReactNode }) {
       </main>
 
       <AnimatePresence>
+        {toast && (
+          <motion.button
+            className="notification-toast"
+            type="button"
+            onClick={() => openNotification(toast)}
+            initial={reduceMotion ? false : { opacity: 0, y: -10, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -8, scale: 0.98 }}
+            transition={{ duration: 0.18 }}
+          >
+            <Bell size={17} weight="fill" />
+            <span>
+              <strong>{toast.title}</strong>
+              <small>{toast.message}</small>
+            </span>
+          </motion.button>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
         {createClassOpen && (
           <>
             <motion.button
@@ -234,6 +370,75 @@ export function TeacherShell({ children }: { children: ReactNode }) {
       </AnimatePresence>
     </div>
   );
+}
+
+function getNotificationOrigin() {
+  if (typeof window === "undefined") return "";
+  const url = new URL(API_BASE_URL || "/api", window.location.origin);
+  url.pathname = url.pathname.replace(/\/api\/?$/, "") || "/";
+  url.search = "";
+  url.hash = "";
+  return url.toString().replace(/\/$/, "");
+}
+
+function getNotificationAuth() {
+  if (typeof window === "undefined") return {};
+  const cookieToken = readCookie("access_token") || readCookie("jwt");
+  const storageToken = window.localStorage.getItem("access_token") || window.localStorage.getItem("token");
+  const token = cookieToken || storageToken;
+  return token ? { token } : {};
+}
+
+function readCookie(name: string) {
+  if (typeof document === "undefined") return null;
+  const row = document.cookie
+    .split(";")
+    .map((item) => item.trim())
+    .find((item) => item.startsWith(`${name}=`));
+  return row ? decodeURIComponent(row.slice(name.length + 1)) : null;
+}
+
+function normalizeNotification(payload: unknown): TeacherNotification | null {
+  if (!payload || typeof payload !== "object") return null;
+  const data = payload as Partial<TeacherNotification>;
+  if (!data.title && !data.message) return null;
+  return {
+    recipientId: typeof data.recipientId === "string" ? data.recipientId : undefined,
+    title: typeof data.title === "string" ? data.title : "Thông báo mới",
+    message: typeof data.message === "string" ? data.message : "",
+    type: typeof data.type === "string" ? data.type : undefined,
+    lessonId: typeof data.lessonId === "string" ? data.lessonId : undefined,
+    path: typeof data.path === "string" ? data.path : undefined,
+    createdAt: typeof data.createdAt === "string" ? data.createdAt : new Date().toISOString(),
+  };
+}
+
+function notificationKey(notification: TeacherNotification) {
+  return `${notification.type || "notification"}:${notification.lessonId || notification.createdAt || notification.message}`;
+}
+
+function mergeNotifications(incoming: TeacherNotification[], current: TeacherNotification[]) {
+  const merged = [...incoming, ...current];
+  return merged.filter((item, index) => merged.findIndex((candidate) => notificationKey(candidate) === notificationKey(item)) === index).slice(0, 6);
+}
+
+function reportNotification(report: CopilotReportSummary): TeacherNotification {
+  const classId = report.classIds?.[0];
+  return {
+    title: "Báo cáo bài học đã sẵn sàng",
+    message: `Báo cáo cho bài "${report.title}" đã sẵn sàng để xem.`,
+    type: "COPILOT_REPORT_READY",
+    lessonId: report.lessonId,
+    path: classId ? `/teacher/classes/${classId}?tab=reports&report=${report.lessonId}` : "/teacher/classes?tab=reports",
+    createdAt: report.reportedAt || new Date().toISOString(),
+  };
+}
+
+function formatNotificationTime(value?: string) {
+  if (!value) return "Vừa xong";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Vừa xong";
+  return date.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
 }
 
 function CopilotSidebar({ pathname, conversations, loading }: { pathname: string; conversations: Array<{ conversation_id: string; title: string; updated_at: string }>; loading: boolean }) {

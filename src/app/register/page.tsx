@@ -108,27 +108,27 @@ export default function RegisterPage() {
             <div className="auth-field-grid">
               <div className="form-field">
                 <label htmlFor="full-name">Họ và tên</label>
-                <div className="input-with-icon"><IdentificationCard size={17} /><input id="full-name" value={form.fullName} onChange={(event) => update("fullName", event.target.value)} autoComplete="name" maxLength={100} required /></div>
+                <div className="input-with-icon"><IdentificationCard size={17} /><input id="full-name" value={form.fullName} onChange={(event) => update("fullName", event.target.value)} autoComplete="name" placeholder="Ví dụ: Nguyễn Minh Anh" maxLength={100} required /></div>
               </div>
               <div className="form-field">
                 <label htmlFor="register-username">Tên đăng nhập</label>
-                <div className="input-with-icon"><User size={17} /><input id="register-username" value={form.username} onChange={(event) => update("username", event.target.value)} autoComplete="username" minLength={3} maxLength={50} required /></div>
+                <div className="input-with-icon"><User size={17} /><input id="register-username" value={form.username} onChange={(event) => update("username", event.target.value)} autoComplete="username" placeholder="Ví dụ: minhanh08" minLength={3} maxLength={50} required /></div>
               </div>
             </div>
 
             <div className="form-field">
               <label htmlFor="email">Email</label>
-              <div className="input-with-icon"><EnvelopeSimple size={17} /><input id="email" type="email" value={form.email} onChange={(event) => update("email", event.target.value)} autoComplete="email" required /></div>
+              <div className="input-with-icon"><EnvelopeSimple size={17} /><input id="email" type="email" value={form.email} onChange={(event) => update("email", event.target.value)} autoComplete="email" placeholder="minhanh@example.com" required /></div>
             </div>
 
             <div className="auth-field-grid">
               <div className="form-field">
                 <label htmlFor="register-password">Mật khẩu</label>
-                <div className="input-with-icon"><LockKey size={17} /><input id="register-password" type="password" value={form.password} onChange={(event) => update("password", event.target.value)} autoComplete="new-password" minLength={6} maxLength={100} required /></div>
+                <div className="input-with-icon"><LockKey size={17} /><input id="register-password" type="password" value={form.password} onChange={(event) => update("password", event.target.value)} autoComplete="new-password" placeholder="Tối thiểu 6 ký tự" minLength={6} maxLength={100} required /></div>
               </div>
               <div className="form-field">
                 <label htmlFor="confirm-password">Nhập lại mật khẩu</label>
-                <div className="input-with-icon"><LockKey size={17} /><input id="confirm-password" type="password" value={form.confirmPassword} onChange={(event) => update("confirmPassword", event.target.value)} autoComplete="new-password" minLength={6} maxLength={100} required /></div>
+                <div className="input-with-icon"><LockKey size={17} /><input id="confirm-password" type="password" value={form.confirmPassword} onChange={(event) => update("confirmPassword", event.target.value)} autoComplete="new-password" placeholder="Nhập lại mật khẩu" minLength={6} maxLength={100} required /></div>
               </div>
             </div>
 

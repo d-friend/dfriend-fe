@@ -9,12 +9,11 @@ import {
   Flag,
   House,
   Lightbulb,
-  Path,
   Sparkle,
   Target,
 } from "@phosphor-icons/react";
 import { motion, useReducedMotion } from "motion/react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { MathContent } from "@/components/shared/math-content";
 import { studentApi, studentKeys } from "@/lib/student-api";
 import type { StudySessionSummary } from "@/types/contracts";
@@ -53,6 +52,8 @@ export function FeedbackWorkspace({ lessonId }: { lessonId: string }) {
     : totalCount;
   const completedCount = finishedCount || Math.round((progressPercent / 100) * expectedCount);
   const average = finishedScores.length ? finishedScores.reduce((sum, score) => sum + score, 0) / finishedScores.length : normalizeScore(reportQuery.data?.score ?? 0);
+  const scoreTone = average >= 8 ? "strong" : average >= 6 ? "steady" : "focus";
+  const scoreCopy = scoreTone === "strong" ? "Nắm khá chắc" : scoreTone === "steady" ? "Đang lên nhịp" : "Cần củng cố";
   const lessonTitle = reportQuery.data?.lessonTitle || "Bài học vừa hoàn thành";
   const hasExtra = !followUp && Boolean(extrasQuery.data?.extra_exercises?.some((group) => group.exercises.length));
 
@@ -63,22 +64,44 @@ export function FeedbackWorkspace({ lessonId }: { lessonId: string }) {
 
   return (
     <main className="feedback-shell">
-      <motion.div className="feedback-summit" initial={reduceMotion ? false : { opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.38 }}>
-        <div className="summit-symbol"><Path size={32} /><Flag size={23} weight="fill" /></div>
-        <span>{lessonTitle}</span>
-        <h1>Bạn đã hoàn thành bài học</h1>
-        <p>{completedCount}/{expectedCount} bài đã đi qua <i /> Điểm phiên học {formatScore(average)}/10</p>
-      </motion.div>
+      <motion.section className="feedback-hero" initial={reduceMotion ? false : { opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.38 }} aria-labelledby="feedback-title">
+        <div className="feedback-score-card" data-tone={scoreTone}>
+          <span>Điểm phiên học</span>
+          <strong>{formatScore(average)}</strong>
+          <small>/10</small>
+          <b>{scoreCopy}</b>
+        </div>
+        <div className="feedback-hero-copy">
+          <span>{lessonTitle}</span>
+          <h1 id="feedback-title">Feedback sau phiên học</h1>
+          <MathContent>{summary?.summary || "Bạn đã hoàn thành phiên học. Hãy xem lại phần cần luyện và thử giải thích mỗi bước bằng lời của mình."}</MathContent>
+        </div>
+        <div className="feedback-progress-card">
+          <span>Bài đã đi qua</span>
+          <strong>{completedCount}/{expectedCount}</strong>
+          <small>{Math.round(progressPercent)}% tiến độ</small>
+        </div>
+      </motion.section>
 
       <div className="feedback-content">
         <section className="feedback-columns">
-          <div className="feedback-list strengths"><div><span><Sparkle size={19} weight="fill" /></span><h2>Bạn làm tốt</h2></div>{strengths.length ? strengths.map((item) => <div className="feedback-math-row" key={item}><Check size={17} weight="bold" /><MathContent>{humanize(item)}</MathContent></div>) : <p><Check size={17} weight="bold" /> Bạn đã kiên trì đi hết phiên học.</p>}</div>
-          <div className="feedback-list gaps"><div><span><Target size={19} /></span><h2>Cần luyện thêm</h2></div>{gaps.length ? gaps.map((item) => <div className="feedback-math-row" key={item}><ArrowRight size={17} /><MathContent>{humanize(item)}</MathContent></div>) : <p><ArrowRight size={17} /> Xem lại cách trình bày từng bước để câu trả lời rõ hơn.</p>}</div>
+          <FeedbackList
+            kind="strengths"
+            icon={<Sparkle size={19} weight="fill" />}
+            title="Điểm mạnh"
+            empty="Bạn đã kiên trì đi hết phiên học."
+            items={strengths}
+          />
+          <FeedbackList
+            kind="gaps"
+            icon={<Target size={19} />}
+            title="Cần luyện thêm"
+            empty="Xem lại cách trình bày từng bước để câu trả lời rõ hơn."
+            items={gaps}
+          />
         </section>
 
-        <section className="feedback-scores" aria-label="Kết quả phiên học"><ResultFact label="Điểm phiên học" value={formatScore(average)} unit="/10" /><ResultFact label="Bài đã hoàn thành" value={`${completedCount}/${expectedCount}`} unit="bài" /><ResultFact label="Tiến độ" value={`${Math.round(progressPercent)}%`} /></section>
-
-        <section className="buddy-observation"><span><Lightbulb size={21} weight="fill" /></span><div><h2>Bạn học AI nhận thấy</h2><MathContent>{summary?.summary || "Bạn đã hoàn thành phiên học. Hãy xem lại phần cần luyện và thử giải thích mỗi bước bằng lời của mình."}</MathContent></div></section>
+        <section className="buddy-observation"><span><Lightbulb size={21} weight="fill" /></span><div><h2>Việc nên làm tiếp theo</h2><p>{gaps.length ? "Chọn một điểm cần luyện, giải lại chậm hơn và nói rõ lý do của từng bước." : "Giữ nhịp này: tiếp tục giải thích cách làm trước khi chốt đáp án."}</p></div></section>
 
         <div className="feedback-actions"><Link className="student-primary-button" href="/student/dashboard"><House size={18} weight="fill" /> Về Hôm nay</Link>{hasExtra && <Link className="student-secondary-button" href={`/student/lesson/extra_${lessonId}/part2`}>Luyện thêm <ArrowRight size={17} /></Link>}</div>
       </div>
@@ -86,7 +109,17 @@ export function FeedbackWorkspace({ lessonId }: { lessonId: string }) {
   );
 }
 
-function ResultFact({ label, value, unit }: { label: string; value: string; unit?: string }) { return <div><span>{label}</span><strong>{value}</strong>{unit && <small>{unit}</small>}</div>; }
+function FeedbackList({ kind, icon, title, empty, items }: { kind: "strengths" | "gaps"; icon: ReactNode; title: string; empty: string; items: string[] }) {
+  const Icon = kind === "strengths" ? Check : ArrowRight;
+  return (
+    <section className={`feedback-list ${kind}`}>
+      <header><span>{icon}</span><h2>{title}</h2></header>
+      <div className="feedback-list-body">
+        {items.length ? items.map((item) => <div className="feedback-math-row" key={item}><Icon size={17} weight={kind === "strengths" ? "bold" : "regular"} /><MathContent>{humanize(item)}</MathContent></div>) : <p><Icon size={17} weight={kind === "strengths" ? "bold" : "regular"} /> {empty}</p>}
+      </div>
+    </section>
+  );
+}
 function normalizeScore(value: number) { return value > 10 ? value / 10 : value; }
 function formatScore(value: number) { return Number.isInteger(value) ? String(value) : value.toFixed(1); }
 function clamp(value: number, minimum: number, maximum: number) { return Math.min(maximum, Math.max(minimum, value)); }

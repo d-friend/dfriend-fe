@@ -5,7 +5,21 @@ export function normalizeMathMarkdown(value: string | null | undefined) {
     .replace(/\\\[/g, () => "\n$$\n")
     .replace(/\\\]/g, () => "\n$$\n")
     .replace(/\\\(/g, () => "$")
-    .replace(/\\\)/g, () => "$");
+    .replace(/\\\)/g, () => "$")
+    .replace(/\$\$([\s\S]*?)\$\$/g, (match, inner: string, offset: number, source: string) => {
+      const previous = source[offset - 1];
+      const next = source[offset + match.length];
+      const blockLike = (!previous || previous === "\n") && (!next || next === "\n");
+      if (blockLike || inner.includes("\n")) return match;
+      return `$${inner.trim()}$`;
+    })
+    .replace(/(^|[^\\])\$([^$\n]+)\$/g, (match, prefix: string, inner: string) => {
+      const text = inner.trim();
+      // LLMs occasionally wrap a Vietnamese word in dollar delimiters. KaTeX then
+      // renders it as broken math instead of readable lesson text.
+      if (/[^\x00-\x7F]/.test(text) && !/[\\0-9=+*/^_<>()[\]{}|]/.test(text)) return `${prefix}${text}`;
+      return match;
+    });
 }
 
 /** Answers are often returned as bare TeX because the entire field is mathematical. */

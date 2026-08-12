@@ -23,6 +23,7 @@ import {
 } from "@phosphor-icons/react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useMemo, useState, type FormEvent } from "react";
+import { MathContent } from "@/components/shared/math-content";
 import { getApiErrorMessage, teacherApi } from "@/lib/api-client";
 import type { ClassTab, CopilotReportSummary, TeacherRoadmapItem, TeacherSubmission } from "@/types/contracts";
 
@@ -172,7 +173,7 @@ function StudentDetail({ classId, studentId, studentName }: { classId: string; s
 function MetricsOverview({ data }: { data: Awaited<ReturnType<typeof teacherApi.metrics>> | undefined }) {
   if (!data) return null;
   const metrics = [{ label: "Tư duy", value: data.thinkingScore }, { label: "Kỹ năng", value: data.skillScore }, { label: "Kết quả", value: data.resultScore }];
-  return <div className="detail-section-stack"><div className="metric-grid">{metrics.map((item) => <div key={item.label}><span>{item.label}</span><strong>{Number(item.value || 0).toFixed(1)}</strong><small>/10</small></div>)}</div><section className="detail-section"><h3>Kỹ năng gần đây</h3>{data.mastery?.length ? <div className="mastery-list">{data.mastery.map((item) => <div key={item.skill}><span><strong>{item.skill}</strong><small>{item.status || "Đang học"}</small></span><b>{item.score.toFixed(1)}</b></div>)}</div> : <p className="muted-copy">Chưa đủ dữ liệu kỹ năng để phân tích.</p>}</section></div>;
+  return <div className="detail-section-stack"><div className="metric-grid">{metrics.map((item) => <div key={item.label}><span>{item.label}</span><strong>{normalizeScore10(item.value).toFixed(1)}</strong><small>/10</small></div>)}</div><section className="detail-section"><h3>Kỹ năng gần đây</h3>{data.mastery?.length ? <div className="mastery-list">{data.mastery.map((item) => <div key={item.skill}><span><strong>{item.skill}</strong><small>{item.status || "Đang học"}</small></span><b>{normalizeScore10(item.score).toFixed(1)}</b></div>)}</div> : <p className="muted-copy">Chưa đủ dữ liệu kỹ năng để phân tích.</p>}</section></div>;
 }
 
 function SubmissionList({ items, onGrade, saving }: { items: TeacherSubmission[]; onGrade: (id: string, value: number, feedback: string) => void; saving: boolean }) {
@@ -196,7 +197,36 @@ function ActivityList({ items }: { items: Array<{ id?: string; eventType?: strin
 function LessonDetail({ lesson, studentCount }: { lesson: TeacherRoadmapItem | undefined; studentCount: number }) {
   if (!lesson) return <DetailEmpty tab="learning-path" />;
   const incomplete = Math.max(studentCount - lesson.completedCount, 0);
-  return <div className="detail-content"><p className="workspace-kicker">Chi tiết bài học</p><h2>{lesson.title}</h2><p className="detail-lead">{lesson.description || "Bài học trong lộ trình hiện tại của lớp."}</p><div className="metric-grid two"><div><span>Đã hoàn thành</span><strong>{lesson.completedCount}</strong><small>/{studentCount}</small></div><div><span>Chưa hoàn thành</span><strong>{incomplete}</strong><small>học sinh</small></div></div><section className="detail-section"><h3>Nội dung</h3><div className="lesson-facts"><div><span>Số câu hỏi</span><strong>{lesson.questionsCount}</strong></div><div><span>Trạng thái</span><strong>Đang mở</strong></div><div><span>Deadline</span><strong>{formatDate(lesson.deadline)}</strong></div></div></section></div>;
+  const hook = lessonHook(lesson);
+  return <div className="detail-content"><p className="workspace-kicker">Chi tiết bài học</p><h2>{lesson.title}</h2><div className="metric-grid two"><div><span>Đã hoàn thành</span><strong>{lesson.completedCount}</strong><small>/{studentCount}</small></div><div><span>Chưa hoàn thành</span><strong>{incomplete}</strong><small>học sinh</small></div></div><section className="detail-section"><h3>Nội dung</h3>{hook?.trim() && <div className="knowledge-hook"><strong>Hook bài học</strong><MathContent>{hook}</MathContent></div>}<div className="lesson-facts"><div><span>Số câu hỏi</span><strong>{lesson.questionsCount}</strong></div><div><span>Trạng thái</span><strong>Đang mở</strong></div><div><span>Deadline</span><strong>{formatDate(lesson.deadline)}</strong></div></div></section></div>;
+}
+
+function lessonHook(lesson: TeacherRoadmapItem) {
+  const directHook = firstText(lesson.lesson1Knowledge?.hook, lesson.knowledge?.hook, lesson.hook);
+  if (directHook) return directHook;
+  const source = firstText(
+    lesson.lesson1Knowledge?.items?.map((item) => item.content).join("\n\n"),
+    lesson.knowledge?.content,
+    lesson.knowledge?.material,
+    lesson.material,
+    lesson.content,
+    lesson.description,
+  );
+  return source ? extractMarkdownSection(source, "Đặt vấn đề") : "";
+}
+
+function firstText(...values: Array<string | null | undefined>) {
+  return values.find((value) => typeof value === "string" && value.trim())?.trim() || "";
+}
+
+function extractMarkdownSection(value: string, heading: string) {
+  const escapedHeading = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const headingPattern = new RegExp(`(^|\\s)#{1,6}\\s+${escapedHeading}\\s*`, "i");
+  const start = value.search(headingPattern);
+  if (start < 0) return "";
+  const afterHeading = value.slice(start).replace(headingPattern, "");
+  const nextHeading = afterHeading.search(/\s#{1,6}\s+\S/);
+  return (nextHeading >= 0 ? afterHeading.slice(0, nextHeading) : afterHeading).trim();
 }
 
 function ReportDetail({ lessonId }: { lessonId: string }) {
@@ -208,7 +238,7 @@ function ReportDetail({ lessonId }: { lessonId: string }) {
   if (data.status !== "REPORT_READY") return <div className="detail-content"><p className="workspace-kicker">Báo cáo bài học</p><h2>{data.title}</h2><div className="report-processing"><ClockCounterClockwise size={28} /><h3>{statusLabel(data.status)}</h3><p>Copilot sẽ cập nhật trang này khi phân tích hoàn tất.</p></div></div>;
   if (!data.report) return <div className="detail-content"><p className="workspace-kicker">Báo cáo bài học</p><h2>{data.title}</h2><ListEmpty icon={<WarningCircle size={25} />} title="Báo cáo chưa có nội dung" body="Trạng thái đã hoàn tất nhưng dữ liệu phân tích đang trống. Thử tải lại sau." /></div>;
   const skill = data.report;
-  return <div className="detail-content report-detail"><p className="workspace-kicker">Báo cáo bài học</p><h2>{data.title}</h2><p className="detail-lead">Phân tích từ {data.totalStudents} học sinh, thang điểm {skill.score_scale}.</p><section className="detail-section"><h3>Kỹ năng lớp làm tốt</h3><SkillChips items={skill.strengths} empty="Chưa có kỹ năng nổi bật." /></section><section className="detail-section"><h3>Cần củng cố</h3><SkillChips items={skill.top_weak_skill_ids.length ? skill.top_weak_skill_ids : skill.gaps} empty="Không có khoảng trống kỹ năng đáng kể." warning /></section><GroupList title="Cần phụ đạo" ids={skill.remedial_student_ids} names={skill.student_names} /><GroupList title="Có thể nâng cao" ids={skill.advanced_student_ids} names={skill.student_names} /><GroupList title="Chưa hoàn thành" ids={skill.not_finished_student_ids} names={skill.student_names} /><section className="report-actions"><Link className="primary-button" href={`/teacher/lessons/new?fromReport=${lessonId}`}><Sparkle size={16} weight="fill" /> Tạo bài tiếp theo</Link>{(skill.remedial_student_ids.length > 0 || skill.advanced_student_ids.length > 0) && <Link className="secondary-button" href={`/teacher/copilot/${lessonId}/extra`}>Tạo bài theo nhóm</Link>}</section></div>;
+  return <div className="detail-content report-detail"><p className="workspace-kicker">Báo cáo bài học</p><h2>{data.title}</h2><p className="detail-lead">Phân tích từ {data.totalStudents} học sinh, thang điểm {skill.score_scale}.</p><section className="detail-section"><h3>Kỹ năng lớp làm tốt</h3><SkillChips items={skill.strengths} empty="Chưa có kỹ năng nổi bật." /></section><section className="detail-section"><h3>Cần củng cố</h3><SkillChips items={skill.top_weak_skill_ids.length ? skill.top_weak_skill_ids : skill.gaps} empty="Không có khoảng trống kỹ năng đáng kể." warning /></section>{skill.not_assessed_skill_ids?.length ? <section className="detail-section"><h3>Chưa được đánh giá</h3><SkillChips items={skill.not_assessed_skill_ids} empty="" /></section> : null}<GroupList title="Cần phụ đạo" ids={skill.remedial_student_ids} names={skill.student_names} /><GroupList title="Có thể nâng cao" ids={skill.advanced_student_ids} names={skill.student_names} /><GroupList title="Chưa hoàn thành" ids={skill.not_finished_student_ids} names={skill.student_names} /><section className="report-actions"><Link className="primary-button" href={`/teacher/lessons/new?fromReport=${lessonId}`}><Sparkle size={16} weight="fill" /> Tạo bài tiếp theo</Link>{(skill.remedial_student_ids.length > 0 || skill.advanced_student_ids.length > 0) && <Link className="secondary-button" href={`/teacher/copilot/${lessonId}/extra`}>Tạo bài theo nhóm</Link>}</section></div>;
 }
 
 function SkillChips({ items, empty, warning = false }: { items: string[]; empty: string; warning?: boolean }) { return items.length ? <div className="skill-chips" data-warning={warning}>{items.map((item) => <span key={item}>{item}</span>)}</div> : <p className="muted-copy">{empty}</p>; }
@@ -233,8 +263,9 @@ function AddStudentsSheet({ classId, onClose }: { classId: string; onClose: () =
 function ListSkeleton() { return <div className="grid gap-2 p-4"><div className="skeleton h-16" /><div className="skeleton h-16" /><div className="skeleton h-16" /></div>; }
 function ListError({ error }: { error: unknown }) { return <div className="list-error"><WarningCircle size={24} /><strong>Không tải được dữ liệu</strong><span>{getApiErrorMessage(error)}</span></div>; }
 function ListEmpty({ icon, title, body, action }: { icon: React.ReactNode; title: string; body: string; action?: React.ReactNode }) { return <div className="list-empty">{icon}<h3>{title}</h3><p>{body}</p>{action}</div>; }
-function ClassSkeleton() { return <div className="class-workspace"><div className="class-master p-6"><div className="skeleton h-32" /><div className="skeleton h-12 mt-4" /><ListSkeleton /></div><div className="class-detail"><ListSkeleton /></div></div>; }
+function ClassSkeleton() { return <section className="class-workspace" data-detail-open="false"><div className="class-master p-6"><div className="skeleton h-32" /><div className="skeleton h-12 mt-4" /><ListSkeleton /></div><aside className="class-detail" aria-label="Chi tiết"><ListSkeleton /></aside></section>; }
 function normalizeTab(value: string | null): ClassTab { return value === "learning-path" || value === "reports" ? value : "students"; }
+function normalizeScore10(value: number | null | undefined) { const numeric = Number(value || 0); return numeric > 10 && numeric <= 100 ? numeric / 10 : numeric; }
 function initials(value: string) { return value.split(/\s+/).slice(-2).map((part) => part[0]).join("").toUpperCase(); }
 function statusLabel(value: string) { return value === "PENDING" ? "Chờ deadline" : value === "ANALYSING" ? "Đang phân tích" : value === "FAILED" ? "Phân tích thất bại" : "Sẵn sàng"; }
 function formatDate(value?: string, includeTime = false) { if (!value) return "Chưa đặt"; const date = new Date(value); if (Number.isNaN(date.getTime())) return "Chưa rõ"; return new Intl.DateTimeFormat("vi-VN", includeTime ? { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" } : { day: "2-digit", month: "short", year: "numeric" }).format(date); }

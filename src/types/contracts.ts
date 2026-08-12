@@ -10,6 +10,65 @@ export interface AuthUser {
   is_beta_activated: boolean;
 }
 
+export interface AdminUser {
+  id: string;
+  username: string;
+  email: string;
+  fullName: string;
+  role: "STUDENT" | "TEACHER" | "ADMIN";
+  isBetaActivated: boolean;
+  studentId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdminOverview {
+  stats: {
+    users: Record<"ADMIN" | "TEACHER" | "STUDENT", number>;
+    classes: number;
+    enrollments: number;
+    lessons: number;
+    submissions: number;
+    submissionsToday: number;
+    activityEvents: number;
+    documentEvents: number;
+    activeUsersNow: number;
+  };
+  dau: {
+    from: string;
+    to: string;
+    timezone: string;
+    data: Array<{ date: string; activeUsers: number }>;
+  };
+  recentUsers: AdminUser[];
+  recentClasses: Array<{
+    classId: string;
+    className: string;
+    classCode: string;
+    teacherId: string;
+    studentCount: number;
+    lessonCount: number;
+    createdAt: string | null;
+  }>;
+  recentSubmissions: Array<{
+    id: string;
+    exerciseId: string;
+    status: string;
+    grade: number | null;
+    studentName: string;
+    submittedAt: string;
+  }>;
+  recentActivities: Array<{
+    id: string;
+    userId: string;
+    eventType: string;
+    source: string;
+    classId?: string | null;
+    lessonId?: string | null;
+    createdAt: string;
+  }>;
+}
+
 export interface TeacherClass {
   class_id: string;
   class_name: string;
@@ -46,6 +105,19 @@ export interface TeacherRoadmapItem {
   questionsCount: number;
   completedCount: number;
   deadline?: string;
+  hook?: string;
+  material?: string;
+  content?: string;
+  lesson1Knowledge?: {
+    concept_name?: string;
+    hook?: string;
+    items?: Array<{ title?: string; content?: string }>;
+  } | null;
+  knowledge?: {
+    hook?: string;
+    content?: string;
+    material?: string;
+  } | null;
 }
 
 export interface TeacherSubmission {
@@ -160,6 +232,7 @@ export interface CopilotReportDetail extends CopilotReportSummary {
     remedial_student_ids: string[];
     advanced_student_ids: string[];
     not_finished_student_ids: string[];
+    not_assessed_skill_ids?: string[];
     top_weak_skill_ids: string[];
     attention_reasons: Record<string, string[]>;
     student_names: Record<string, string>;
@@ -190,7 +263,11 @@ export interface ExerciseDocument {
   description?: string;
   subject: string;
   topic: string;
-  concept: string;
+  concept: string | null;
+  scopeKind: "concept" | "general_topic";
+  indexStatus: "pending" | "indexing" | "ready" | "needs_manual" | "failed";
+  indexSummary?: Record<string, number>;
+  indexError?: string | null;
   shared: boolean;
   fileName?: string;
   contentType?: string;

@@ -20,6 +20,7 @@ import {
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { MathContent } from "@/components/shared/math-content";
+import { LessonGenerationLoading } from "@/components/teacher/lesson-generation-loading";
 import { getApiErrorMessage, teacherApi } from "@/lib/api-client";
 import { streamCopilot } from "@/lib/copilot-stream";
 import type { CopilotDraft, CopilotLessonPlan, CopilotStep, CopilotTurn } from "@/types/contracts";
@@ -50,6 +51,7 @@ export function CopilotWorkspace({ conversationId }: { conversationId?: string }
   const [title, setTitle] = useState("Cuộc trò chuyện mới");
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
 
   const classesQuery = useQuery({ queryKey: ["teacher", "classes"], queryFn: teacherApi.classes });
   const conversationQuery = useQuery({
@@ -73,6 +75,13 @@ export function CopilotWorkspace({ conversationId }: { conversationId?: string }
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth" });
   }, [turns, reduceMotion]);
+
+  useEffect(() => {
+    const input = composerRef.current;
+    if (!input) return;
+    input.style.height = "auto";
+    input.style.height = `${Math.min(input.scrollHeight, 160)}px`;
+  }, [message]);
 
   useEffect(() => () => abortRef.current?.abort(), []);
 
@@ -246,6 +255,7 @@ export function CopilotWorkspace({ conversationId }: { conversationId?: string }
       <div className="composer-wrap">
         <form className="composer" onSubmit={(event) => void send(event)}>
           <textarea
+            ref={composerRef}
             value={message}
             onChange={(event) => setMessage(event.target.value)}
             onKeyDown={(event) => {
@@ -343,6 +353,12 @@ function LessonPlanCard({ plan, classId }: { plan: CopilotLessonPlan; classId: s
 
   return (
     <section className="lesson-plan-card" aria-label="Xác nhận kế hoạch bài học">
+      {confirm.isPending && (
+        <LessonGenerationLoading
+          origin="copilot"
+          detail="Copilot đang biến kế hoạch đã xác nhận thành bản nháp có thể review trước khi xuất bản."
+        />
+      )}
       <header>
         <span><BookOpenText size={18} weight="fill" /></span>
         <div className="lesson-plan-breadcrumb">
@@ -383,8 +399,8 @@ function LessonPlanCard({ plan, classId }: { plan: CopilotLessonPlan; classId: s
             disabled={confirm.isPending || selected.size === 0 || !classId}
             title={!classId ? "Chọn một lớp ở mục Ngữ cảnh trước khi soạn bài" : undefined}
           >
-            {confirm.isPending ? <CircleNotch className="animate-spin" size={16} /> : <Check size={16} weight="bold" />}
-            {confirm.isPending ? "Đang soạn bài" : requiresGenerationConsent ? "Cho phép AI soạn phần thiếu" : "Đúng rồi, soạn bài"}
+            <Check size={16} weight="bold" />
+            {requiresGenerationConsent ? "Cho phép AI soạn phần thiếu" : "Đúng rồi, soạn bài"}
           </button>
         )}
       </div>

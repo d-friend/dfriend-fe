@@ -1,5 +1,7 @@
 import axios, { AxiosError } from "axios";
 import type {
+  AdminOverview,
+  AdminUser,
   ActivityEvent,
   ApiErrorEnvelope,
   AuthUser,
@@ -64,6 +66,31 @@ export function getApiErrorMessage(error: unknown, fallback = "Không thể hoà
   return Array.isArray(message) ? message.join(" ") : message || fallback;
 }
 
+export function isApiErrorStatus(error: unknown, status: number) {
+  return axios.isAxiosError(error) && error.response?.status === status;
+}
+
+export const adminApi = {
+  me: async () => (await apiClient.get<AuthUser>("/auth/me")).data,
+  overview: async () => (await apiClient.get<AdminOverview>("/admin/overview")).data,
+  users: async (params?: { query?: string; role?: AdminUser["role"] | "" }) => {
+    const requestParams = {
+      ...(params?.query ? { query: params.query } : {}),
+      ...(params?.role ? { role: params.role } : {}),
+    };
+    return (await apiClient.get<AdminUser[]>("/admin/users", { params: requestParams })).data;
+  },
+  createUser: async (payload: {
+    username: string;
+    email: string;
+    fullName: string;
+    password: string;
+    role: "STUDENT" | "TEACHER";
+  }) => (await apiClient.post<AdminUser>("/admin/users", payload)).data,
+  resetPassword: async (userId: string, newPassword: string) =>
+    (await apiClient.patch<AdminUser>(`/admin/users/${userId}/password`, { newPassword })).data,
+};
+
 export const teacherApi = {
   me: async () => (await apiClient.get<AuthUser>("/auth/me")).data,
   classes: async () =>
@@ -118,6 +145,8 @@ export const teacherApi = {
     ).data,
   reports: async () =>
     (await apiClient.get<CopilotReportSummary[]>("/teacher/copilot/reports")).data,
+  dismissCopilotReport: async (lessonId: string) =>
+    apiClient.post(`/teacher/copilot/${lessonId}/dismiss`),
   report: async (lessonId: string) =>
     (
       await apiClient.get<CopilotReportDetail>(
@@ -168,6 +197,8 @@ export const teacherApi = {
   curriculum: async () =>
     (await apiClient.get<{ subjects: CurriculumSubject[] }>("/exercises/curriculum")).data
       .subjects,
+  curriculumSkills: async (subject: string, topic: string, concept: string) =>
+    (await apiClient.get<{ skills: Array<{ skill_id: string; label_vi: string }> }>("/exercises/curriculum/skills", { params: { subject, topic, concept } })).data.skills,
   documents: async () =>
     (
       await apiClient.get<{ documents: ExerciseDocument[] }>(
@@ -176,7 +207,7 @@ export const teacherApi = {
     ).data.documents,
   uploadDocument: async (body: FormData) =>
     (
-      await apiClient.post<{ message: string; documentId: string; previewUrl: string }>(
+      await apiClient.post<{ message: string; documentId: string; previewUrl: string; indexStatus: string }>(
         "/exercises/upload",
         body,
         { timeout: 120_000 },
@@ -184,12 +215,15 @@ export const teacherApi = {
     ).data,
   deleteDocument: async (documentId: string) =>
     apiClient.delete(`/exercises/documents/${documentId}`),
+  retryDocumentIndex: async (documentId: string) =>
+    (await apiClient.post<{ documentId: string; indexStatus: string }>(`/exercises/documents/${documentId}/retry-index`)).data,
   precheckLesson: async (payload: {
-    lessonGoal: string;
+    lessonGoal?: string;
     title: string;
     subject: string;
     topic: string;
     concept: string;
+    explicitSkillIds?: string[];
   }) =>
     (
       await apiClient.post<Record<string, unknown>>(
@@ -204,6 +238,12 @@ export const teacherApi = {
         "/exercises/create-lesson/lesson1",
         body,
         { timeout: 360_000 },
+      )
+    ).data,
+  lessonGenerationJob: async (jobId: string) =>
+    (
+      await apiClient.get<Record<string, unknown>>(
+        `/exercises/create-lesson/jobs/${encodeURIComponent(jobId)}`,
       )
     ).data,
   generateLesson2: async (body: FormData) =>
@@ -246,6 +286,14 @@ export const teacherApi = {
     (
       await apiClient.post<Record<string, unknown>>(
         `/exercises/ai-drafts/${lessonId}/review/reopen`,
+      )
+    ).data,
+  completeLessonReviewPool: async (lessonId: string) =>
+    (
+      await apiClient.post<Record<string, unknown>>(
+        `/exercises/ai-drafts/${lessonId}/review/complete-pool`,
+        undefined,
+        { timeout: 360_000 },
       )
     ).data,
   regenerateLessonReview: async (

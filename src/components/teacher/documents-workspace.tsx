@@ -3,6 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowSquareOut,
+  ArrowsClockwise,
   Check,
   File,
   FilePdf,
@@ -36,12 +37,12 @@ export function DocumentsWorkspace() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  const documentsQuery = useQuery({ queryKey: ["teacher", "documents"], queryFn: teacherApi.documents });
+  const documentsQuery = useQuery({ queryKey: ["teacher", "documents"], queryFn: teacherApi.documents, refetchInterval: (query) => query.state.data?.some((item) => item.indexStatus === "pending" || item.indexStatus === "indexing") ? 5000 : false });
   const curriculumQuery = useQuery({ queryKey: ["curriculum"], queryFn: teacherApi.curriculum, staleTime: Infinity });
 
   const topics = useMemo(() => curriculumQuery.data?.find((item) => item.value === subject)?.topics || [], [curriculumQuery.data, subject]);
   const concepts = useMemo(() => topics.find((item) => item.value === topic)?.concepts || [], [topics, topic]);
-  const canUpload = Boolean(file && title.trim() && subject && topic && concept);
+  const canUpload = Boolean(file && title.trim() && subject && topic);
   const filtered = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase("vi");
     if (!needle) return documentsQuery.data || [];
@@ -74,6 +75,11 @@ export function DocumentsWorkspace() {
     mutationFn: teacherApi.deleteDocument,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["teacher", "documents"] }),
   });
+  const retryIndex = useMutation({
+    mutationFn: teacherApi.retryDocumentIndex,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["teacher", "documents"] }),
+    onError: (retryError) => setError(getApiErrorMessage(retryError, "Không thể lập chỉ mục lại tài liệu.")),
+  });
 
   function chooseFile(next: File | null) {
     setError("");
@@ -101,8 +107,8 @@ export function DocumentsWorkspace() {
     event.preventDefault();
     setError("");
     setSuccess("");
-    if (!file || !title.trim() || !subject || !topic || !concept) {
-      setError("Chọn đủ môn, chủ đề, khái niệm và tệp trước khi tải lên.");
+    if (!file || !title.trim() || !subject || !topic) {
+      setError("Chọn đủ môn, chủ đề, tên tài liệu và tệp trước khi tải lên.");
       return;
     }
     const body = new FormData();
@@ -111,8 +117,8 @@ export function DocumentsWorkspace() {
     body.append("description", description.trim());
     body.append("subject", subject);
     body.append("topic", topic);
-    body.append("concept", concept);
-    body.append("shared", String(shared));
+    if (concept) body.append("concept", concept);
+    body.append("shared", shared ? "true" : "false");
     upload.mutate(body);
   }
 
@@ -155,9 +161,9 @@ export function DocumentsWorkspace() {
               </select>
             </div>
             <div className="form-field">
-              <label htmlFor="document-concept">Khái niệm</label>
-              <select id="document-concept" className="select" value={concept} onChange={(event) => setConcept(event.target.value)} disabled={!topic} required>
-                <option value="">Chọn khái niệm</option>
+              <label htmlFor="document-concept">Khái niệm (không bắt buộc)</label>
+              <select id="document-concept" className="select" value={concept} onChange={(event) => setConcept(event.target.value)} disabled={!topic}>
+                <option value="">Tài liệu chung của chủ đề</option>
                 {concepts.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
               </select>
             </div>
@@ -188,7 +194,7 @@ export function DocumentsWorkspace() {
               <span>{shared ? <UsersThree size={18} /> : <LockSimple size={18} />}<strong>{shared ? "Chia sẻ với kho chung" : "Chỉ mình tôi"}</strong><small>{shared ? "Giáo viên khác có thể dùng bài tập từ tài liệu này." : "Tài liệu chỉ xuất hiện trong kết quả của bạn."}</small></span>
             </label>
             <div className="col-span-full flex justify-end">
-              <button className="primary-button" type="submit" disabled={upload.isPending || !canUpload} title={canUpload ? undefined : "Chọn đủ taxonomy, tên tài liệu và tệp trước khi lưu"}>{upload.isPending ? "Đang lưu tài liệu" : "Lưu vào kho"}</button>
+              <button className="primary-button" type="submit" disabled={upload.isPending || !canUpload} title={canUpload ? undefined : "Chọn môn, chủ đề, tên tài liệu và tệp trước khi lưu"}>{upload.isPending ? "Đang lưu tài liệu" : "Lưu vào kho"}</button>
             </div>
           </div>
         </form>
@@ -207,10 +213,11 @@ export function DocumentsWorkspace() {
         <div className="document-grid">
           {filtered.map((document) => (
             <article className="document-card" key={document.documentId}>
-              <div className="document-card-top"><span className="document-file-icon"><File size={21} /></span><span className="document-visibility">{document.shared ? <UsersThree size={14} /> : <LockSimple size={14} />}{document.shared ? "Shared" : "Private"}</span></div>
+              <div className="document-card-top"><span className="document-file-icon"><File size={21} /></span><span className="document-visibility">{document.shared ? <UsersThree size={14} /> : <LockSimple size={14} />}{document.shared ? "Dùng chung" : "Riêng tư"}</span></div>
               <div><h2>{document.title}</h2><p>{document.description || document.fileName || "Nguồn bài tập đã phân loại"}</p></div>
-              <div className="taxonomy-path"><span>{document.subject}</span><span>{document.topic}</span><span>{document.concept}</span></div>
-              <footer><span>{formatDate(document.createdAt)}</span><div>{document.previewUrl && <a className="icon-button" href={document.previewUrl} target="_blank" rel="noreferrer" aria-label="Xem tài liệu"><ArrowSquareOut size={16} /></a>}<button className="icon-button" onClick={() => { if (window.confirm("Xóa tài liệu khỏi kho?")) remove.mutate(document.documentId); }} aria-label="Xóa tài liệu"><Trash size={16} /></button></div></footer>
+              <div className="taxonomy-path"><span>{document.subject}</span><span>{document.topic}</span><span>{document.concept || "Tài liệu chung"}</span></div>
+              {document.indexStatus === "needs_manual" && <p className="document-index-help">Tệp nguồn không đọc được. Xóa và tải lại tệp để dùng cho Copilot.</p>}
+              <footer><span>{documentIndexLabel(document.indexStatus)} · {formatDate(document.createdAt)}</span><div>{document.previewUrl && <a className="icon-button" href={document.previewUrl} target="_blank" rel="noreferrer" aria-label="Xem tài liệu"><ArrowSquareOut size={16} /></a>}{document.indexStatus === "failed" && <button className="icon-button" disabled={retryIndex.isPending} onClick={() => retryIndex.mutate(document.documentId)} aria-label="Lập chỉ mục lại"><ArrowsClockwise size={16} /></button>}<button className="icon-button" onClick={() => { if (window.confirm("Xóa tài liệu khỏi kho?")) remove.mutate(document.documentId); }} aria-label="Xóa tài liệu"><Trash size={16} /></button></div></footer>
             </article>
           ))}
         </div>
@@ -229,4 +236,11 @@ function formatBytes(value: number) {
 function formatDate(value: string) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? "Gần đây" : new Intl.DateTimeFormat("vi-VN", { day: "2-digit", month: "short", year: "numeric" }).format(date);
+}
+
+function documentIndexLabel(status: string) {
+  if (status === "ready") return "Sẵn sàng dùng";
+  if (status === "needs_manual") return "Cần thay tệp nguồn";
+  if (status === "failed") return "Chưa thể lập chỉ mục";
+  return "Đang lập chỉ mục";
 }

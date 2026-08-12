@@ -18,7 +18,7 @@ import {
   WarningCircle,
 } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { getApiErrorMessage } from "@/lib/api-client";
 import { MathContent } from "@/components/shared/math-content";
 import { studentApi, studentKeys } from "@/lib/student-api";
@@ -52,6 +52,7 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
   const [activeProblemId, setActiveProblemId] = useState<number | null>(null);
   const streamController = useRef<AbortController | null>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
+  const buddyMessageRef = useRef<HTMLTextAreaElement>(null);
 
   const initialise = useCallback(async () => {
     setUiState("initialising");
@@ -71,6 +72,12 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
 
   useEffect(() => { void initialise(); return () => streamController.current?.abort(); }, [initialise]);
   useEffect(() => { transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight, behavior: "smooth" }); }, [messages]);
+  useEffect(() => {
+    const input = buddyMessageRef.current;
+    if (!input) return;
+    input.style.height = "auto";
+    input.style.height = `${Math.min(input.scrollHeight, 160)}px`;
+  }, [message]);
 
   const problems = session?.problems || [];
   const currentProblem = problems.find((item) => item.problem_id === activeProblemId) || problems[0];
@@ -122,7 +129,14 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
     else setUiState("idle");
   }
 
-  function submitChat(event: FormEvent) { event.preventDefault(); const value = message; setMessage(""); void sendTurn(value, false); }
+  const canSendChat = Boolean(message.trim()) && uiState !== "streaming" && uiState !== "closing";
+
+  function submitChat(event?: FormEvent) { event?.preventDefault(); if (!canSendChat) return; const value = message; setMessage(""); void sendTurn(value, false); }
+  function handleChatKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key !== "Enter" || event.shiftKey) return;
+    event.preventDefault();
+    submitChat();
+  }
   function submitAnswer(event: FormEvent) { event.preventDefault(); const value = answer; setAnswer(""); void sendTurn(value, true); }
 
   async function closeSession() {
@@ -172,7 +186,7 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
           <section className="buddy-pane" data-mobile-active={mobileTab === "buddy"}>
             <div className="buddy-title"><div><span className="buddy-mark"><Sparkle size={18} weight="fill" /></span><div><strong>Bạn học AI</strong><small>Gợi mở, không làm hộ</small></div></div>{uiState === "streaming" && <span className="buddy-typing">Đang đọc cách bạn nghĩ</span>}</div>
             <div className="buddy-transcript" ref={transcriptRef}>{messages.map((item) => <article key={item.id} data-role={item.role} data-degraded={item.degraded}><span>{item.role === "buddy" ? "Study Buddy" : "Bạn"}</span>{item.content ? <MathContent>{item.content}</MathContent> : <div className="markdown-body"><TypingPlaceholder /></div>}</article>)}{uiState === "awaiting_reasoning" && <StateNotice type="reasoning" />}{uiState === "farming" && <StateNotice type="farming" />}{uiState === "degraded" && <StateNotice type="degraded" />}{allComplete && <div className="summit-card"><Flag size={25} weight="fill" /><div><strong>Bạn đã tới đỉnh của phiên học</strong><span>Kết thúc để nhận phản hồi về điểm mạnh và phần nên luyện tiếp.</span></div><button className="student-primary-button" onClick={closeSession} disabled={uiState === "closing"}>{uiState === "closing" ? "Đang tổng hợp" : "Nhận feedback"}</button></div>}{sessionError && session && <div className="student-form-error" role="alert">{sessionError} <button onClick={closeSession}>Thử lại</button></div>}</div>
-            <form className="buddy-composer" onSubmit={submitChat}><label htmlFor="buddy-message">Trao đổi cách làm</label><div><textarea id="buddy-message" rows={1} value={message} onChange={(event) => setMessage(event.target.value)} placeholder="Mình đang nghĩ là..." disabled={uiState === "streaming" || uiState === "closing"} /><button aria-label="Gửi tin nhắn" disabled={!message.trim() || uiState === "streaming" || uiState === "closing"}><PaperPlaneTilt size={19} weight="fill" /></button></div></form>
+            <form className="buddy-composer" onSubmit={submitChat}><label htmlFor="buddy-message">Trao đổi cách làm</label><div><textarea ref={buddyMessageRef} id="buddy-message" rows={1} value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={handleChatKeyDown} placeholder="Mình đang nghĩ là..." disabled={uiState === "streaming" || uiState === "closing"} /><button aria-label="Gửi tin nhắn" disabled={!canSendChat}><PaperPlaneTilt size={19} weight="fill" /></button></div></form>
           </section>
         </div>
       ) : null}
