@@ -1,6 +1,7 @@
 import axios, { AxiosError } from "axios";
 import type {
   AdminOverview,
+  AdminOperations,
   AdminUser,
   ActivityEvent,
   ApiErrorEnvelope,
@@ -73,6 +74,7 @@ export function isApiErrorStatus(error: unknown, status: number) {
 export const adminApi = {
   me: async () => (await apiClient.get<AuthUser>("/auth/me")).data,
   overview: async () => (await apiClient.get<AdminOverview>("/admin/overview")).data,
+  operations: async () => (await apiClient.get<AdminOperations>("/admin/operations")).data,
   users: async (params?: { query?: string; role?: AdminUser["role"] | "" }) => {
     const requestParams = {
       ...(params?.query ? { query: params.query } : {}),

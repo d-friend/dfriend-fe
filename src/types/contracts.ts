@@ -69,6 +69,33 @@ export interface AdminOverview {
   }>;
 }
 
+export interface AdminOperations {
+  generatedAt: string;
+  queues: Array<{
+    name: string;
+    status: "healthy" | "degraded" | "unavailable";
+    waiting: number;
+    active: number;
+    delayed: number;
+    failed: number;
+  }>;
+  reports: {
+    status: "healthy" | "degraded" | "unavailable";
+    pending: number;
+    analysing: number;
+    ready: number;
+    failed: number;
+    unread: number;
+    oldestAnalysingAt: string | null;
+  };
+  ai: {
+    status: "healthy" | "unavailable";
+    costSinceStartUsd: number;
+    pipelines: Array<{ pipeline: string; costUsd: number; succeeded: number; failed: number }>;
+    latencyByModel: Array<{ model: string; p50Seconds: number | null; p95Seconds: number | null }>;
+  };
+}
+
 export interface TeacherClass {
   class_id: string;
   class_name: string;
