@@ -89,7 +89,8 @@ export interface AdminOperations {
     oldestAnalysingAt: string | null;
   };
   ai: {
-    status: "healthy" | "unavailable";
+    status: "healthy" | "degraded" | "unavailable";
+    reason: string | null;
     costSinceStartUsd: number;
     pipelines: Array<{ pipeline: string; costUsd: number; succeeded: number; failed: number }>;
     latencyByModel: Array<{ model: string; p50Seconds: number | null; p95Seconds: number | null }>;

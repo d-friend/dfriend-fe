@@ -524,6 +524,7 @@ button:disabled {
 .admin-report-state span { display: block; color: var(--muted); font-size: 0.58rem; }
 .admin-report-state strong { display: block; margin-top: 0.24rem; font-family: var(--font-display); font-size: 1.2rem; }
 .admin-operation-note { margin-top: 0.6rem; }
+.admin-operation-warning { margin: 0.7rem 0 0; color: var(--danger); font-size: 0.65rem; }
 .operations-loading { min-height: 12rem; }
 
 .admin-metric,

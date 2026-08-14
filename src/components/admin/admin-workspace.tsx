@@ -158,7 +158,7 @@ export function AdminWorkspace() {
             <p>Quan sát trực tiếp, tự làm mới mỗi 30 giây</p>
             <h2 id="operations-heading">Vận hành hệ thống</h2>
           </div>
-          <StatusBadge status={operations.data?.ai.status || "unavailable"} label={operations.data?.ai.status === "healthy" ? "AI service online" : "AI service chưa phản hồi"} />
+          <StatusBadge status={operations.data?.ai.status || "unavailable"} label={operations.data?.ai.status === "healthy" ? "AI service online" : operations.data?.ai.status === "degraded" ? "AI online, metrics lỗi" : "AI service chưa phản hồi"} />
         </div>
         {operations.isLoading ? <div className="admin-loading operations-loading" /> : operations.data ? <>
           <div className="admin-operation-summary">
@@ -167,6 +167,7 @@ export function AdminWorkspace() {
             <Metric icon={<FileText size={21} />} label="Report chưa đọc" value={operations.data.reports.unread} detail={`${operations.data.reports.analysing} report đang phân tích`} />
             <Metric icon={<ChartLineUp size={21} />} label="Chi phí AI" value={`$${operations.data.ai.costSinceStartUsd.toFixed(3)}`} detail="Tích lũy từ lúc AI-service khởi động" />
           </div>
+          {operations.data.ai.reason && <p className="admin-operation-warning">{operations.data.ai.reason}</p>}
           <div className="admin-operation-grid">
             <section className="admin-operation-panel">
               <div className="admin-panel-heading"><span><ChartLineUp size={19} /></span><div><h2>Queue</h2><p>Backlog hiện tại của worker.</p></div></div>
