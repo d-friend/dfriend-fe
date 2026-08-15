@@ -74,7 +74,7 @@ export function LessonAuthoring() {
 
   const classes = useQuery({ queryKey: ["teacher", "classes"], queryFn: teacherApi.classes });
   const me = useQuery({ queryKey: ["auth", "me"], queryFn: teacherApi.me, staleTime: Infinity });
-  const curriculum = useQuery({ queryKey: ["curriculum"], queryFn: teacherApi.curriculum, staleTime: Infinity });
+  const curriculum = useQuery({ queryKey: ["curriculum"], queryFn: teacherApi.curriculum, staleTime: 5 * 60 * 1000 });
   const reportPrefill = useQuery({
     queryKey: ["teacher", "copilot", reportId, "report"],
     queryFn: () => teacherApi.report(reportId as string),
