@@ -38,7 +38,7 @@ export function DocumentsWorkspace() {
   const [success, setSuccess] = useState("");
 
   const documentsQuery = useQuery({ queryKey: ["teacher", "documents"], queryFn: teacherApi.documents, refetchInterval: (query) => query.state.data?.some((item) => item.indexStatus === "pending" || item.indexStatus === "indexing") ? 5000 : false });
-  const curriculumQuery = useQuery({ queryKey: ["curriculum"], queryFn: teacherApi.curriculum, staleTime: Infinity });
+  const curriculumQuery = useQuery({ queryKey: ["curriculum"], queryFn: teacherApi.curriculum, staleTime: 5 * 60 * 1000 });
 
   const topics = useMemo(() => curriculumQuery.data?.find((item) => item.value === subject)?.topics || [], [curriculumQuery.data, subject]);
   const concepts = useMemo(() => topics.find((item) => item.value === topic)?.concepts || [], [topics, topic]);
