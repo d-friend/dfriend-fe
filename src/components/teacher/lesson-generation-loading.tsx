@@ -2,11 +2,11 @@ import { Sparkle } from "@phosphor-icons/react";
 import type { CSSProperties } from "react";
 
 const generationSteps = [
-  "Phân tích mục tiêu",
-  "Tìm bài trong kho",
-  "Trích xuất tài liệu",
-  "Soạn phần thiếu",
-  "Tạo bản review",
+  "Chốt kỹ năng và mục tiêu",
+  "Soạn Session 1",
+  "Dựng 3 mạch luyện tập",
+  "Kiểm tra 12 slot độc lập",
+  "Lưu bản review",
 ];
 
 export function LessonGenerationLoading({
@@ -36,7 +36,7 @@ export function LessonGenerationLoading({
           ))}
         </ol>
         <div className="generation-track"><i /></div>
-        <small>Quá trình này có thể mất vài phút. Đừng đóng tab này.</small>
+        <small>Tiến trình đã được lưu. Bạn có thể rời trang và quay lại sau.</small>
       </div>
     </section>
   );

@@ -30,10 +30,10 @@ type ChatMessage = { id: string; role: "student" | "buddy"; content: string; deg
 type SessionUiState = "initialising" | "idle" | "streaming" | "awaiting_reasoning" | "farming" | "degraded" | "closing";
 
 const ROLE_LABELS: Record<string, string> = {
-  reinforcement: "Làm chắc nền tảng",
-  challenge: "Thử thách",
-  exploration: "Khám phá",
-  extension: "Mở rộng",
+  reinforcement: "The Warm-Up · Chứng minh điều vừa học",
+  challenge: "The Push · Nặng hơn nhưng quen thuộc",
+  exploration: "The Break · Phá cách làm cũ",
+  extension: "The Build · Áp dụng pattern mới",
 };
 
 export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
