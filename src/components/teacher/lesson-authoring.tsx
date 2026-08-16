@@ -70,7 +70,7 @@ export function LessonAuthoring() {
   const [reviewSkills, setReviewSkills] = useState<string[]>([]);
   const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
   const [classIds, setClassIds] = useState<string[]>([]);
-  const [deadline, setDeadline] = useState(defaultDeadline());
+  const [deadline, setDeadline] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [draftExerciseId, setDraftExerciseId] = useState("");
   const [activeJobId, setActiveJobId] = useState("");
@@ -105,6 +105,7 @@ export function LessonAuthoring() {
       // A report-driven follow-up is always a new lesson. Restoring the last
       // wizard draft here could silently update or publish an unrelated lesson.
       if (reportId) {
+        setDeadline(defaultDeadline());
         setStorageReady(true);
         return;
       }
@@ -122,9 +123,11 @@ export function LessonAuthoring() {
           setClassIds(Array.isArray(saved.classIds) ? saved.classIds.map(String) : []);
           setSelectedSkills(Array.isArray(saved.selectedSkills) ? saved.selectedSkills.map(String).slice(0, 4) : []);
           setLessonKind(saved.lessonKind === "targeted_review" ? "targeted_review" : "normal");
-          if (saved.deadline) setDeadline(String(saved.deadline));
+          setDeadline(saved.deadline ? String(saved.deadline) : defaultDeadline());
           if (saved.draftExerciseId) setDraftExerciseId(String(saved.draftExerciseId));
           if (saved.activeJobId) setActiveJobId(String(saved.activeJobId));
+        } else {
+          setDeadline(defaultDeadline());
         }
       } catch {
         window.localStorage.removeItem(storageKey);
