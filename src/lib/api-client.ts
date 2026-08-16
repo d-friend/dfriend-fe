@@ -9,7 +9,6 @@ import type {
   ConversationDetail,
   ConversationSummary,
   CopilotChatResponse,
-  CopilotDraft,
   CopilotReportDetail,
   CopilotReportSummary,
   CurriculumSubject,
@@ -181,10 +180,10 @@ export const teacherApi = {
     payload: { classId: string; goalText: string; conceptKey: string; skillIds: string[]; allowGenerated?: boolean },
   ) =>
     (
-      await apiClient.post<CopilotDraft & { success: boolean }>(
+      await apiClient.post<{ jobId: string; generationRunId: string; status: "queued" }>(
         "/teacher/copilot/lesson-plan/confirm",
         payload,
-        { timeout: 360_000 },
+        { timeout: 30_000 },
       )
     ).data,
   renameConversation: async (conversationId: string, title: string) =>
@@ -246,6 +245,12 @@ export const teacherApi = {
     (
       await apiClient.get<Record<string, unknown>>(
         `/exercises/create-lesson/jobs/${encodeURIComponent(jobId)}`,
+      )
+    ).data,
+  retryMissingLessonSlots: async (jobId: string) =>
+    (
+      await apiClient.post<{ jobId: string; generationRunId: string; status: "queued" }>(
+        `/exercises/create-lesson/jobs/${encodeURIComponent(jobId)}/retry-missing`,
       )
     ).data,
   generateLesson2: async (body: FormData) =>

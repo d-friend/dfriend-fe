@@ -16,6 +16,8 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEven
 import { MathContent } from "@/components/shared/math-content";
 import { LessonGenerationLoading } from "@/components/teacher/lesson-generation-loading";
 import { getApiErrorMessage, isApiErrorStatus, teacherApi } from "@/lib/api-client";
+import { waitForLessonGeneration } from "@/lib/lesson-generation";
+import type { LessonGenerationResult } from "@/lib/lesson-generation";
 
 export interface ProblemView {
   id: string;
@@ -44,6 +46,12 @@ export interface DraftReviewModel {
 }
 
 const emptyDraftReview: DraftReviewModel = { knowledgeSections: [], knowledgeProblems: [], masteryProblems: [] };
+const masteryRoleLabels: Record<string, string> = {
+  reinforcement: "The Warm-Up · Chứng minh điều vừa học",
+  challenge: "The Push · Nặng hơn nhưng quen thuộc",
+  exploration: "The Break · Phá cách làm cũ",
+  extension: "The Build · Áp dụng pattern mới",
+};
 
 type AuthoringPhase = "goal" | "precheck" | "generating";
 
@@ -66,6 +74,7 @@ export function LessonAuthoring() {
   const [file, setFile] = useState<File | null>(null);
   const [draftExerciseId, setDraftExerciseId] = useState("");
   const [activeJobId, setActiveJobId] = useState("");
+  const [partialGeneration, setPartialGeneration] = useState<LessonGenerationResult | null>(null);
   const [precheckData, setPrecheckData] = useState<Record<string, unknown> | null>(null);
   const [error, setError] = useState("");
   const [storageReady, setStorageReady] = useState(false);
@@ -169,6 +178,11 @@ export function LessonAuthoring() {
       setPhase("generating");
       try {
         const lesson1 = await waitForLessonGeneration(activeJobId, setGenerationStep);
+        if (lesson1.generationStatus === "partial") {
+          setPartialGeneration(lesson1);
+          setPhase("goal");
+          return;
+        }
         await finishGeneratedLesson(lesson1);
         return;
       } catch (generationError) {
@@ -256,10 +270,37 @@ export function LessonAuthoring() {
       const lesson1 = queued.jobId
         ? await waitForLessonGeneration(String(queued.jobId), setGenerationStep)
         : queued;
+      if (lesson1.generationStatus === "partial") {
+        setPartialGeneration(lesson1);
+        setPhase("goal");
+        return;
+      }
       await finishGeneratedLesson(lesson1);
     } catch (generationError) {
       if (generationError instanceof Error && generationError.name === "LessonGenerationFailed") setActiveJobId("");
       setError(getApiErrorMessage(generationError, "Không thể tạo bài học. Bản nháp đã được giữ lại để thử tiếp."));
+      setPhase("goal");
+    }
+  }
+
+  async function retryMissingSlots() {
+    if (!activeJobId) return;
+    setPhase("generating");
+    setGenerationStep("Đang tạo tiếp các slot còn thiếu");
+    setError("");
+    try {
+      const queued = await teacherApi.retryMissingLessonSlots(activeJobId);
+      setActiveJobId(queued.jobId);
+      const result = await waitForLessonGeneration(queued.jobId, setGenerationStep);
+      if (result.generationStatus === "partial") {
+        setPartialGeneration(result);
+        setPhase("goal");
+        return;
+      }
+      setPartialGeneration(null);
+      await finishGeneratedLesson(result);
+    } catch (retryError) {
+      setError(getApiErrorMessage(retryError, "Chưa thể tạo tiếp các bài còn thiếu."));
       setPhase("goal");
     }
   }
@@ -371,6 +412,18 @@ export function LessonAuthoring() {
         <div className="precheck-gate"><WarningCircle size={27} /><h2>Chọn kỹ năng cần ôn</h2><p>Copilot nhận diện các kỹ năng dưới đây từ mục tiêu. Chọn từ hai đến bốn kỹ năng để tạo bài ôn trong đúng khái niệm này.</p><div className="class-picker">{(Array.isArray(precheckData.skill_ids) ? precheckData.skill_ids : []).filter((skill): skill is string => typeof skill === "string").map((skill) => { const checked = reviewSkills.includes(skill); return <label key={skill}><input type="checkbox" checked={checked} disabled={!checked && reviewSkills.length >= 4} onChange={(event) => setReviewSkills((current) => event.target.checked ? [...current, skill].slice(0, 4) : current.filter((item) => item !== skill))} /><span><strong>{skill}</strong></span></label>; })}</div><div><button className="secondary-button" onClick={() => { setPrecheckData(null); setPhase("goal"); }}>Quay lại</button><button className="primary-button" disabled={reviewSkills.length < 2 || reviewSkills.length > 4} onClick={() => void generate(true)}>Tạo bài ôn</button></div></div>
       )}
 
+      {partialGeneration && phase === "goal" && (
+        <div className="precheck-gate" role="status">
+          <WarningCircle size={27} />
+          <h2>Bản nháp đang có {partialGeneration.generationCompletedSlots || 0}/{partialGeneration.generationTotalSlots || 12} bài đạt chuẩn</h2>
+          <p>Phần đã đạt được giữ nguyên. Bạn có thể tạo tiếp đúng các slot còn thiếu hoặc mở bản hiện tại để review blocker.</p>
+          <div>
+            <button className="secondary-button" onClick={() => void finishGeneratedLesson(partialGeneration)}>Review bản hiện tại</button>
+            <button className="primary-button" onClick={() => void retryMissingSlots()}>Tạo tiếp phần thiếu</button>
+          </div>
+        </div>
+      )}
+
       {phase === "generating" && (
         <LessonGenerationLoading
           origin="wizard"
@@ -383,7 +436,7 @@ export function LessonAuthoring() {
 
 export function DraftProblemList({ problems, rejected, onToggle }: { problems: ProblemView[]; rejected: Set<string>; onToggle: (id: string) => void }) {
   if (!problems.length) return <div className="list-empty"><Lightbulb size={26} /><h3>Chưa tìm thấy danh sách bài</h3><p>Bản nháp có thể cần được tạo lại.</p></div>;
-  return <div className="draft-problem-list">{problems.map((problem, index) => <article key={problem.id} data-rejected={rejected.has(problem.id)}><header><span>{String(index + 1).padStart(2, "0")}</span><div><strong>{problem.role || "Bài luyện tập"}</strong><small>{problem.skill || "Theo mục tiêu bài học"}</small>{problemSourceLabel(problem) && <small className="problem-origin">{problemSourceLabel(problem)}</small>}</div><button className={rejected.has(problem.id) ? "secondary-button" : "text-button"} onClick={() => onToggle(problem.id)}>{rejected.has(problem.id) ? "Giữ lại" : "Cần thay"}</button></header><MathContent>{problem.prompt}</MathContent>{problem.choices?.length ? <ol type="A">{problem.choices.map((choice, choiceIndex) => <li key={`${problem.id}:${choiceIndex}`}><MathContent answer>{choice}</MathContent></li>)}</ol> : null}{problem.answer ? <div className="draft-answer"><span>Đáp án</span><MathContent answer>{problem.answer}</MathContent></div> : null}{problem.solution ? <details className="draft-solution"><summary>Xem lời giải Copilot sẽ dùng</summary><MathContent>{problem.solution}</MathContent></details> : null}</article>)}</div>;
+  return <div className="draft-problem-list">{problems.map((problem, index) => <article key={problem.id} data-rejected={rejected.has(problem.id)}><header><span>{String(index + 1).padStart(2, "0")}</span><div><strong>{problem.role ? masteryRoleLabels[problem.role] || problem.role : "Bài luyện tập"}</strong><small>{problem.skill || "Theo mục tiêu bài học"}</small>{problemSourceLabel(problem) && <small className="problem-origin">{problemSourceLabel(problem)}</small>}</div><button className={rejected.has(problem.id) ? "secondary-button" : "text-button"} onClick={() => onToggle(problem.id)}>{rejected.has(problem.id) ? "Giữ lại" : "Cần thay"}</button></header><MathContent>{problem.prompt}</MathContent>{problem.choices?.length ? <ol type="A">{problem.choices.map((choice, choiceIndex) => <li key={`${problem.id}:${choiceIndex}`}><MathContent answer>{choice}</MathContent></li>)}</ol> : null}{problem.answer ? <div className="draft-answer"><span>Đáp án</span><MathContent answer>{problem.answer}</MathContent></div> : null}{problem.solution ? <details className="draft-solution"><summary>Xem lời giải Copilot sẽ dùng</summary><MathContent>{problem.solution}</MathContent></details> : null}</article>)}</div>;
 }
 
 export function DraftReviewContent({ review, rejected, onToggle }: { review: DraftReviewModel; rejected: Set<string>; onToggle: (id: string) => void }) {
@@ -409,27 +462,6 @@ async function waitForDocumentIndex(documentId: string) {
     await new Promise((resolve) => window.setTimeout(resolve, 1500));
   }
   throw new Error("Lập chỉ mục tài liệu mất quá nhiều thời gian. Hãy thử lại sau.");
-}
-
-async function waitForLessonGeneration(
-  jobId: string,
-  onStage: (stage: string) => void,
-) {
-  const timeoutAt = Date.now() + 10 * 60_000;
-  while (Date.now() < timeoutAt) {
-    const job = await teacherApi.lessonGenerationJob(jobId);
-    const progress = isRecord(job.progress) ? String(job.progress.stage || "") : "";
-    if (progress === "planning") onStage("Đang lập blueprint kỹ năng và tìm bài trong kho");
-    if (progress === "mastery_supply") onStage("Đang lấy bài phù hợp từ kho, tài liệu và bù phần còn thiếu");
-    if (job.status === "ready" && isRecord(job.result)) return job.result;
-    if (job.status === "failed") {
-      const error = new Error(String(job.error || "Không thể tạo bài học."));
-      error.name = "LessonGenerationFailed";
-      throw error;
-    }
-    await new Promise((resolve) => window.setTimeout(resolve, 1200));
-  }
-  throw new Error("Tạo bài học mất nhiều thời gian hơn dự kiến. Tiến trình vẫn được giữ để thử lại.");
 }
 
 export function normalizeProblems(value: unknown, namespace = "problem"): ProblemView[] {

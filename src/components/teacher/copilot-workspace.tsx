@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowUp,
+  ArrowClockwise,
   BookOpenText,
   Check,
   CheckCircle,
@@ -22,6 +23,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { MathContent } from "@/components/shared/math-content";
 import { LessonGenerationLoading } from "@/components/teacher/lesson-generation-loading";
 import { getApiErrorMessage, teacherApi } from "@/lib/api-client";
+import { waitForLessonGeneration, type LessonGenerationResult } from "@/lib/lesson-generation";
 import { streamCopilot } from "@/lib/copilot-stream";
 import type { CopilotDraft, CopilotLessonPlan, CopilotStep, CopilotTurn } from "@/types/contracts";
 
@@ -326,20 +328,38 @@ function LessonPlanCard({ plan, classId }: { plan: CopilotLessonPlan; classId: s
   const router = useRouter();
   const [selected, setSelected] = useState(() => new Set(plan.skills.filter((skill) => skill.selected).map((skill) => skill.skillId)));
   const [draft, setDraft] = useState<CopilotDraft | null>(null);
+  const [activeJobId, setActiveJobId] = useState("");
+  const [generationStep, setGenerationStep] = useState("Đang đưa yêu cầu vào hàng đợi");
+  const [partial, setPartial] = useState<LessonGenerationResult | null>(null);
   const startsWithoutMaterial = plan.verdict === "no_material" || (plan.bankProblems === 0 && plan.documentUnits === 0);
   const [requiresGenerationConsent, setRequiresGenerationConsent] = useState(startsWithoutMaterial);
   const [consentDetail, setConsentDetail] = useState(startsWithoutMaterial ? plan.detail : "");
   const confirm = useMutation({
-    mutationFn: (allowGenerated: boolean) => teacherApi.confirmCopilotPlan({
-      classId,
-      goalText: plan.goalText,
-      conceptKey: plan.conceptKey,
-      skillIds: Array.from(selected),
-      allowGenerated,
-    }),
+    mutationFn: async (allowGenerated: boolean) => {
+      const queued = await teacherApi.confirmCopilotPlan({
+        classId,
+        goalText: plan.goalText,
+        conceptKey: plan.conceptKey,
+        skillIds: Array.from(selected),
+        allowGenerated,
+      });
+      setActiveJobId(queued.jobId);
+      return waitForLessonGeneration(queued.jobId, setGenerationStep);
+    },
     onSuccess: (result) => {
-      setDraft(result);
-      if (result.lessonId) router.push(`/teacher/lessons/${result.lessonId}/review`);
+      if (result.generationStatus === "partial") {
+        setPartial(result);
+        return;
+      }
+      const lessonId = String(result.lessonId || "");
+      const nextDraft: CopilotDraft = {
+        lessonId,
+        problemCount: Number(result.problemCount || 0),
+        conceptKey: plan.conceptKey,
+        goalText: plan.goalText,
+      };
+      setDraft(nextDraft);
+      if (lessonId) router.push(`/teacher/lessons/${lessonId}/review`);
     },
     onError: (mutationError) => {
       const requirement = generationConsentRequirement(mutationError);
@@ -348,15 +368,32 @@ function LessonPlanCard({ plan, classId }: { plan: CopilotLessonPlan; classId: s
       setConsentDetail(requirement);
     },
   });
+  const retryMissing = useMutation({
+    mutationFn: async () => {
+      const queued = await teacherApi.retryMissingLessonSlots(activeJobId);
+      setActiveJobId(queued.jobId);
+      setGenerationStep("Đang tạo tiếp các slot còn thiếu");
+      return waitForLessonGeneration(queued.jobId, setGenerationStep);
+    },
+    onSuccess: (result) => {
+      if (result.generationStatus === "partial") {
+        setPartial(result);
+        return;
+      }
+      setPartial(null);
+      const lessonId = String(result.lessonId || "");
+      if (lessonId) router.push(`/teacher/lessons/${lessonId}/review`);
+    },
+  });
 
   if (draft) return <DraftCard draft={draft} />;
 
   return (
     <section className="lesson-plan-card" aria-label="Xác nhận kế hoạch bài học">
-      {confirm.isPending && (
+      {(confirm.isPending || retryMissing.isPending) && (
         <LessonGenerationLoading
           origin="copilot"
-          detail="Copilot đang biến kế hoạch đã xác nhận thành bản nháp có thể review trước khi xuất bản."
+          detail={generationStep}
         />
       )}
       <header>
@@ -366,6 +403,32 @@ function LessonPlanCard({ plan, classId }: { plan: CopilotLessonPlan; classId: s
         </div>
       </header>
       <p className="lesson-plan-detail">{plan.detail}</p>
+      {partial && (
+        <div className="lesson-plan-consent" role="status">
+          <WarningCircle size={16} />
+          <span>
+            Đã giữ {partial.generationCompletedSlots || 0}/{partial.generationTotalSlots || 12} bài đạt chuẩn.
+            Bạn có thể review bản hiện tại hoặc chỉ tạo tiếp phần còn thiếu.
+          </span>
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={() => retryMissing.mutate()}
+            disabled={retryMissing.isPending}
+          >
+            <ArrowClockwise size={16} /> Tạo tiếp
+          </button>
+          {partial.lessonId && (
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={() => router.push(`/teacher/lessons/${String(partial.lessonId)}/review`)}
+            >
+              <BookOpenText size={16} /> Review
+            </button>
+          )}
+        </div>
+      )}
       <fieldset>
         <legend>Kỹ năng trong bài</legend>
         <div className="lesson-plan-skills">
@@ -396,7 +459,7 @@ function LessonPlanCard({ plan, classId }: { plan: CopilotLessonPlan; classId: s
           <button
             className="primary-button"
             onClick={() => confirm.mutate(requiresGenerationConsent)}
-            disabled={confirm.isPending || selected.size === 0 || !classId}
+            disabled={confirm.isPending || retryMissing.isPending || selected.size === 0 || !classId}
             title={!classId ? "Chọn một lớp ở mục Ngữ cảnh trước khi soạn bài" : undefined}
           >
             <Check size={16} weight="bold" />
