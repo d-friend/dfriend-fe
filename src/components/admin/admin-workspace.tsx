@@ -6,19 +6,24 @@ import {
   ArrowClockwise,
   ChalkboardTeacher,
   ChartLineUp,
+  ClipboardText,
+  EnvelopeSimple,
   FileText,
   GraduationCap,
   Key,
+  LinkSimple,
   LockKey,
   MagnifyingGlass,
+  PaperPlaneTilt,
   SignOut,
   Student,
+  XCircle,
   UserPlus,
   UsersThree,
 } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
 import { adminApi, apiClient, getApiErrorMessage } from "@/lib/api-client";
-import type { AdminUser } from "@/types/contracts";
+import type { AdminUser, TeacherInviteStatus } from "@/types/contracts";
 
 const emptyCreateForm = {
   username: "",
@@ -39,6 +44,10 @@ export function AdminWorkspace() {
   const [selectedUserId, setSelectedUserId] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [resetError, setResetError] = useState("");
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteError, setInviteError] = useState("");
+  const [latestInviteLink, setLatestInviteLink] = useState("");
+  const [copiedInviteId, setCopiedInviteId] = useState("");
 
   const me = useQuery({ queryKey: ["admin", "me"], queryFn: adminApi.me });
   const overview = useQuery({ queryKey: ["admin", "overview"], queryFn: adminApi.overview, enabled: me.data?.role === "ADMIN" });
@@ -51,6 +60,11 @@ export function AdminWorkspace() {
   const users = useQuery({
     queryKey: ["admin", "users", query, role],
     queryFn: () => adminApi.users({ query: query.trim() || undefined, role }),
+    enabled: me.data?.role === "ADMIN",
+  });
+  const teacherInvites = useQuery({
+    queryKey: ["admin", "teacher-password-invites"],
+    queryFn: adminApi.teacherInvites,
     enabled: me.data?.role === "ADMIN",
   });
 
@@ -79,6 +93,38 @@ export function AdminWorkspace() {
       await queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
     },
     onError: (error) => setResetError(getApiErrorMessage(error, "Không đổi được mật khẩu.")),
+  });
+
+  const createTeacherInvite = useMutation({
+    mutationFn: adminApi.createTeacherInvite,
+    onSuccess: async (invite) => {
+      setInviteEmail("");
+      setLatestInviteLink(invite.inviteLink || "");
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["admin", "teacher-password-invites"] }),
+        queryClient.invalidateQueries({ queryKey: ["admin", "overview"] }),
+        queryClient.invalidateQueries({ queryKey: ["admin", "users"] }),
+      ]);
+    },
+    onError: (error) => setInviteError(getApiErrorMessage(error, "Không tạo được link giáo viên.")),
+  });
+
+  const resendTeacherInvite = useMutation({
+    mutationFn: adminApi.resendTeacherInvite,
+    onSuccess: async (invite) => {
+      setLatestInviteLink(invite.inviteLink || "");
+      await queryClient.invalidateQueries({ queryKey: ["admin", "teacher-password-invites"] });
+    },
+    onError: (error) => setInviteError(getApiErrorMessage(error, "Không tạo lại được link.")),
+  });
+
+  const revokeTeacherInvite = useMutation({
+    mutationFn: adminApi.revokeTeacherInvite,
+    onSuccess: async () => {
+      setLatestInviteLink("");
+      await queryClient.invalidateQueries({ queryKey: ["admin", "teacher-password-invites"] });
+    },
+    onError: (error) => setInviteError(getApiErrorMessage(error, "Không hủy được link.")),
   });
 
   const logout = useMutation({
@@ -111,6 +157,19 @@ export function AdminWorkspace() {
     resetPassword.mutate();
   }
 
+  function submitTeacherInvite(event: FormEvent) {
+    event.preventDefault();
+    setInviteError("");
+    setLatestInviteLink("");
+    createTeacherInvite.mutate({ email: inviteEmail.trim() });
+  }
+
+  async function copyInviteLink(link: string, inviteId = "latest") {
+    await navigator.clipboard.writeText(link);
+    setCopiedInviteId(inviteId);
+    window.setTimeout(() => setCopiedInviteId(""), 1600);
+  }
+
   if (me.isLoading) return <main className="admin-shell"><div className="admin-loading" /></main>;
   if (me.data && me.data.role !== "ADMIN") {
     return (
@@ -135,7 +194,7 @@ export function AdminWorkspace() {
           <h1>Vận hành pilot</h1>
         </div>
         <div>
-          <button className="secondary-button" onClick={() => { void overview.refetch(); void operations.refetch(); void users.refetch(); }}>
+          <button className="secondary-button" onClick={() => { void overview.refetch(); void operations.refetch(); void users.refetch(); void teacherInvites.refetch(); }}>
             <ArrowClockwise size={16} /> Làm mới
           </button>
           <button className="icon-button" onClick={() => logout.mutate()} aria-label="Đăng xuất">
@@ -207,6 +266,50 @@ export function AdminWorkspace() {
             </section>
           </div>
         </> : <p className="inline-error">Không tải được số liệu vận hành.</p>}
+      </section>
+
+      <section className="admin-panel admin-teacher-invites">
+        <div className="admin-panel-heading">
+          <span><EnvelopeSimple size={19} /></span>
+          <div><h2>Mời giáo viên</h2><p>Nhập Gmail, copy link setup/reset password rồi gửi tay cho giáo viên.</p></div>
+        </div>
+        <div className="admin-invite-layout">
+          <form className="admin-form" onSubmit={submitTeacherInvite}>
+            {inviteError && <p className="inline-error" role="alert">{inviteError}</p>}
+            <AdminField label="Gmail giáo viên" type="email" value={inviteEmail} onChange={setInviteEmail} autoComplete="email" />
+            <button className="primary-button" disabled={createTeacherInvite.isPending}>
+              <PaperPlaneTilt size={16} /> {createTeacherInvite.isPending ? "Đang tạo link" : "Tạo link"}
+            </button>
+            {latestInviteLink && (
+              <div className="admin-invite-link" role="status">
+                <LinkSimple size={17} />
+                <input value={latestInviteLink} readOnly aria-label="Link đăng ký giáo viên vừa tạo" />
+                <button type="button" className="secondary-button" onClick={() => { void copyInviteLink(latestInviteLink); }}>
+                  <ClipboardText size={16} /> {copiedInviteId === "latest" ? "Đã copy" : "Copy"}
+                </button>
+              </div>
+            )}
+          </form>
+          <div className="admin-invite-list">
+            {teacherInvites.isLoading ? <div className="admin-loading small" /> : (teacherInvites.data || []).length ? (teacherInvites.data || []).map((invite) => (
+              <article key={invite.id}>
+                <div>
+                  <strong>{invite.email}</strong>
+                  <InviteStatus status={invite.status} />
+                </div>
+                <span>{invite.username} / hết hạn {formatTime(invite.expiresAt)}</span>
+                <div className="admin-invite-actions">
+                  <button type="button" className="secondary-button" disabled={resendTeacherInvite.isPending} onClick={() => resendTeacherInvite.mutate(invite.id)}>
+                    <LinkSimple size={15} /> Tạo link mới
+                  </button>
+                  <button type="button" className="danger-button" disabled={invite.status === "active" || invite.status === "revoked" || revokeTeacherInvite.isPending} onClick={() => revokeTeacherInvite.mutate(invite.id)}>
+                    <XCircle size={15} /> Hủy
+                  </button>
+                </div>
+              </article>
+            )) : <p className="admin-empty">Chưa có invite giáo viên.</p>}
+          </div>
+        </div>
       </section>
 
       <section className="admin-grid">
@@ -304,6 +407,16 @@ function Metric({ icon, label, value, detail }: { icon: ReactNode; label: string
 function StatusBadge({ status, label }: { status: "healthy" | "degraded" | "unavailable"; label?: string }) {
   const text = label || (status === "healthy" ? "Ổn" : status === "degraded" ? "Cần chú ý" : "Không truy cập được");
   return <span className="admin-status-badge" data-status={status}>{text}</span>;
+}
+
+function InviteStatus({ status }: { status: TeacherInviteStatus }) {
+  const labels: Record<TeacherInviteStatus, string> = {
+    pending_password_setup: "Chờ đăng ký",
+    active: "Đã kích hoạt",
+    expired: "Hết hạn",
+    revoked: "Đã hủy",
+  };
+  return <span className="admin-invite-status" data-status={status}>{labels[status]}</span>;
 }
 
 function ReportState({ label, value, alert = false }: { label: string; value: number; alert?: boolean }) {

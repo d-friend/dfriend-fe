@@ -22,6 +22,27 @@ export interface AdminUser {
   updatedAt: string;
 }
 
+export type TeacherInviteStatus =
+  | "pending_password_setup"
+  | "active"
+  | "expired"
+  | "revoked";
+
+export interface TeacherInvite {
+  id: string;
+  userId: string;
+  email: string;
+  username: string;
+  fullName: string;
+  status: TeacherInviteStatus;
+  expiresAt: string;
+  consumedAt: string | null;
+  revokedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  inviteLink?: string;
+}
+
 export interface AdminOverview {
   stats: {
     users: Record<"ADMIN" | "TEACHER" | "STUDENT", number>;

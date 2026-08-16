@@ -15,6 +15,7 @@ import type {
   ExerciseDocument,
   StudentInClass,
   TeacherClass,
+  TeacherInvite,
   TeacherRoadmapItem,
   TeacherStudentMetrics,
   TeacherSubmission,
@@ -90,6 +91,19 @@ export const adminApi = {
   }) => (await apiClient.post<AdminUser>("/admin/users", payload)).data,
   resetPassword: async (userId: string, newPassword: string) =>
     (await apiClient.patch<AdminUser>(`/admin/users/${userId}/password`, { newPassword })).data,
+  teacherInvites: async () =>
+    (await apiClient.get<TeacherInvite[]>("/admin/teacher-password-invites")).data,
+  createTeacherInvite: async (payload: { email: string }) =>
+    (await apiClient.post<TeacherInvite>("/admin/teacher-password-invites", payload)).data,
+  resendTeacherInvite: async (inviteId: string) =>
+    (await apiClient.post<TeacherInvite>(`/admin/teacher-password-invites/${inviteId}/resend`)).data,
+  revokeTeacherInvite: async (inviteId: string) =>
+    (await apiClient.post<TeacherInvite>(`/admin/teacher-password-invites/${inviteId}/revoke`)).data,
+};
+
+export const authApi = {
+  setupTeacherPassword: async (payload: { token: string; password: string }) =>
+    (await apiClient.post<AuthUser>("/auth/teacher-password-setup", payload)).data,
 };
 
 export const teacherApi = {
