@@ -280,10 +280,22 @@ export interface CopilotReportDetail extends CopilotReportSummary {
     gaps: string[];
     remedial_student_ids: string[];
     advanced_student_ids: string[];
+    on_track_student_ids?: string[];
     not_finished_student_ids: string[];
     not_assessed_skill_ids?: string[];
     top_weak_skill_ids: string[];
     attention_reasons: Record<string, string[]>;
+    student_skill_gaps?: Record<string, string[]>;
+    skill_metrics?: Record<string, {
+      skill_id: string;
+      assessed_student_count: number;
+      lesson_average: number;
+      cumulative_average?: number | null;
+      correctness: number;
+      independence: number;
+      reasoning: number;
+      transfer?: number | null;
+    }>;
     student_names: Record<string, string>;
     score_scale: number;
   };

@@ -5949,6 +5949,58 @@ button:disabled {
   color: var(--brand-strong);
 }
 
+.skill-performance-list {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.skill-performance-list > div {
+  border-bottom: 1px solid var(--line);
+  padding: 0.1rem 0 0.7rem;
+}
+
+.skill-performance-heading,
+.skill-performance-context,
+.skill-performance-axes {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.skill-performance-heading > span {
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-size: 0.76rem;
+  font-weight: 650;
+}
+
+.skill-performance-heading strong {
+  flex: 0 0 auto;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 0.9rem;
+}
+
+.skill-performance-heading small,
+.skill-performance-context,
+.skill-performance-axes {
+  color: var(--subtle);
+  font-size: 0.62rem;
+}
+
+.skill-performance-context,
+.skill-performance-axes {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  margin-top: 0.3rem;
+}
+
+.skill-performance-axes span {
+  border-radius: 0.35rem;
+  background: var(--surface-muted);
+  padding: 0.2rem 0.32rem;
+}
+
 .name-grid span {
   background: var(--surface-muted);
   color: var(--ink);
