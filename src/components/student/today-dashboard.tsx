@@ -14,6 +14,7 @@ import {
 import { motion, useReducedMotion } from "motion/react";
 import { useMemo, useState, useSyncExternalStore } from "react";
 import { studentApi, studentKeys } from "@/lib/student-api";
+import { studentMetricItems } from "@/lib/student-metrics";
 import type { StudentAssignment, StudentRoadmapItem } from "@/types/contracts";
 
 type StoredProgress = { completedItems?: number[]; lastOpenedAt?: string };
@@ -112,12 +113,7 @@ export function TodayDashboard() {
     meQuery.isError || classesQuery.isError || assignmentsQuery.isError || metricsQuery.isError;
   const name = (meQuery.data?.full_name || meQuery.data?.username || "bạn").split(/\s+/).at(-1);
   const metrics = metricsQuery.data;
-  const metricItems = [
-    { label: "Độ đúng", value: metrics?.correctness_score },
-    { label: "Tự lực", value: metrics?.independence_score },
-    { label: "Lập luận", value: metrics?.reasoning_score },
-    { label: "Vận dụng", value: metrics?.transfer_score },
-  ];
+  const metricItems = studentMetricItems(metrics);
   const allMetricsZero =
     !metrics || metricItems.every((item) => item.value == null);
 

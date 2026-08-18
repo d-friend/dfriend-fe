@@ -6,6 +6,7 @@ import { ArrowRight, Check, Flag, LockKey, MapTrifold, Path } from "@phosphor-ic
 import { motion, useReducedMotion } from "motion/react";
 import { useMemo, useState } from "react";
 import { studentApi, studentKeys } from "@/lib/student-api";
+import { studentMetricItems } from "@/lib/student-metrics";
 
 export function MountainRoadmap({ initialClassId = "" }: { initialClassId?: string }) {
   const reduceMotion = useReducedMotion();
@@ -57,12 +58,7 @@ export function ProfileWorkspace() {
   const roadmaps = useQueries({ queries: (classesQuery.data || []).map((item) => ({ queryKey: studentKeys.roadmap(item.class_id), queryFn: () => studentApi.roadmap(item.class_id) })) });
   const completed = useMemo(() => roadmaps.flatMap((query, index) => (query.data || []).filter((item) => item.status === "completed").map((item) => ({ ...item, className: classesQuery.data?.[index]?.class_name || "Lớp học" }))), [roadmaps, classesQuery.data]);
   const metrics = metricsQuery.data;
-  const metricItems = [
-    { label: "Độ đúng", value: metrics?.correctness_score },
-    { label: "Tự lực", value: metrics?.independence_score },
-    { label: "Lập luận", value: metrics?.reasoning_score },
-    { label: "Vận dụng", value: metrics?.transfer_score },
-  ];
+  const metricItems = studentMetricItems(metrics);
   const visibleMetrics = metricItems.filter((item): item is { label: string; value: number } => item.value != null);
   const emptyMetrics = !metrics || visibleMetrics.length === 0;
   const fullName = meQuery.data?.full_name || meQuery.data?.username || "Học sinh";
