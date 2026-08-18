@@ -172,7 +172,13 @@ function StudentDetail({ classId, studentId, studentName }: { classId: string; s
 
 function MetricsOverview({ data }: { data: Awaited<ReturnType<typeof teacherApi.metrics>> | undefined }) {
   if (!data) return null;
-  const metrics = [{ label: "Tư duy", value: data.thinkingScore }, { label: "Kỹ năng", value: data.skillScore }, { label: "Kết quả", value: data.resultScore }];
+  const metrics = [
+    { label: "Độ đúng", value: data.correctnessScore },
+    { label: "Tự lực", value: data.independenceScore },
+    { label: "Lập luận", value: data.reasoningScore },
+    { label: "Vận dụng", value: data.transferScore },
+  ].filter((item): item is { label: string; value: number } => item.value != null);
+  if (!metrics.length) return <div className="detail-section-stack"><div className="student-empty-inline">Chưa đủ dữ liệu năng lực.</div></div>;
   return <div className="detail-section-stack"><div className="metric-grid">{metrics.map((item) => <div key={item.label}><span>{item.label}</span><strong>{normalizeScore10(item.value).toFixed(1)}</strong><small>/10</small></div>)}</div><section className="detail-section"><h3>Kỹ năng gần đây</h3>{data.mastery?.length ? <div className="mastery-list">{data.mastery.map((item) => <div key={item.skill}><span><strong>{item.skill}</strong><small>{item.status || "Đang học"}</small></span><b>{normalizeScore10(item.score).toFixed(1)}</b></div>)}</div> : <p className="muted-copy">Chưa đủ dữ liệu kỹ năng để phân tích.</p>}</section></div>;
 }
 

@@ -135,9 +135,10 @@ export interface StudentInClass {
 export interface TeacherStudentMetrics {
   studentId?: string;
   studentName?: string;
-  thinkingScore: number;
-  skillScore: number;
-  resultScore: number;
+  correctnessScore: number | null;
+  independenceScore: number | null;
+  reasoningScore: number | null;
+  transferScore: number | null;
   averageScore?: number;
   completedLessons?: number;
   totalLessons?: number;
@@ -346,9 +347,10 @@ export interface ApiErrorEnvelope {
 
 export interface StudentMetrics {
   student_id: string;
-  thinking_score: number;
-  skill_score: number;
-  result_score: number;
+  correctness_score: number | null;
+  independence_score: number | null;
+  reasoning_score: number | null;
+  transfer_score: number | null;
 }
 
 export interface StudentClass {
@@ -467,6 +469,49 @@ export interface StudySessionSummary {
       weaknesses?: string[];
     }
   >;
+  post_mastery_report?: PostMasteryReport | null;
+}
+
+export interface PostMasteryMetricSet {
+  correctness?: number | null;
+  independence?: number | null;
+  reasoning?: number | null;
+  transfer?: number | null;
+}
+
+export interface PostMasteryEvidenceItem {
+  problem_id: number;
+  role: string;
+  score: number;
+  attempts: number;
+  solved: boolean;
+  received_intervention?: boolean;
+  reasoning_quality?: string;
+  evidence_id?: string;
+}
+
+export interface PostMasterySkillEvidence {
+  skill_id: string;
+  status: "strength" | "gap" | "developing";
+  score: number;
+  metrics?: PostMasteryMetricSet | null;
+  evidence?: PostMasteryEvidenceItem[];
+  reason?: string;
+}
+
+export interface PostMasteryCriterion {
+  code: string;
+  label: string;
+  description: string;
+}
+
+export interface PostMasteryReport {
+  score?: number | null;
+  metrics?: PostMasteryMetricSet | null;
+  strengths?: PostMasterySkillEvidence[];
+  gaps?: PostMasterySkillEvidence[];
+  developing?: PostMasterySkillEvidence[];
+  criteria?: PostMasteryCriterion[];
 }
 
 export interface StudentReport {
@@ -477,5 +522,15 @@ export interface StudentReport {
   status?: string;
   sessionSummary?: StudySessionSummary | null;
   textContent?: string;
-  highlights?: Array<{ word: string; color?: string; feedback: string }>;
+  highlights?: Array<{
+    word: string;
+    color?: string;
+    feedback: string;
+    kind?: "strength" | "gap" | "developing";
+    evidence?: PostMasteryEvidenceItem[];
+    metrics?: PostMasteryMetricSet | null;
+    reason?: string;
+  }>;
+  metrics?: PostMasteryMetricSet | null;
+  criteria?: PostMasteryCriterion[];
 }
