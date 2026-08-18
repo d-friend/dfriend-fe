@@ -112,8 +112,14 @@ export function TodayDashboard() {
     meQuery.isError || classesQuery.isError || assignmentsQuery.isError || metricsQuery.isError;
   const name = (meQuery.data?.full_name || meQuery.data?.username || "bạn").split(/\s+/).at(-1);
   const metrics = metricsQuery.data;
+  const metricItems = [
+    { label: "Độ đúng", value: metrics?.correctness_score },
+    { label: "Tự lực", value: metrics?.independence_score },
+    { label: "Lập luận", value: metrics?.reasoning_score },
+    { label: "Vận dụng", value: metrics?.transfer_score },
+  ];
   const allMetricsZero =
-    !metrics || (!metrics.thinking_score && !metrics.skill_score && !metrics.result_score);
+    !metrics || metricItems.every((item) => item.value == null);
 
   return (
     <div className="student-page student-today-page">
@@ -160,9 +166,9 @@ export function TodayDashboard() {
               <div className="metrics-empty"><Compass size={24} /><span>Hoàn thành Session 2 đầu tiên để xem năng lực.</span></div>
             ) : (
               <>
-                <Metric label="Tư duy" value={metrics?.thinking_score || 0} />
-                <Metric label="Kỹ năng" value={metrics?.skill_score || 0} />
-                <Metric label="Kết quả" value={metrics?.result_score || 0} />
+                {metricItems
+                  .filter((item): item is { label: string; value: number } => item.value != null)
+                  .map((item) => <Metric key={item.label} label={item.label} value={item.value} />)}
               </>
             )}
           </div>

@@ -16,7 +16,8 @@ import { motion, useReducedMotion } from "motion/react";
 import { useEffect, useState, type ReactNode } from "react";
 import { MathContent } from "@/components/shared/math-content";
 import { studentApi, studentKeys } from "@/lib/student-api";
-import type { StudySessionSummary } from "@/types/contracts";
+import { skillDisplayName } from "@/lib/skill-labels";
+import type { PostMasterySkillEvidence, StudySessionSummary } from "@/types/contracts";
 
 export function FeedbackWorkspace({ lessonId }: { lessonId: string }) {
   const reduceMotion = useReducedMotion();
@@ -37,10 +38,12 @@ export function FeedbackWorkspace({ lessonId }: { lessonId: string }) {
   });
   const extrasQuery = useQuery({ queryKey: ["student", "extra", lessonId], queryFn: () => studentApi.extraExercises(lessonId), retry: 0 });
   const summary = cachedSummary || reportQuery.data?.sessionSummary || null;
-  const strengths = unique([...(summary?.strengths || []), ...(summary?.mastering_at || [])]).slice(0, 3);
-  const gaps = unique([...(summary?.weaknesses || []), ...(summary?.struggling_at || [])]).slice(0, 2);
-  const finishedScores = Object.values(summary?.finished_exercise || {}).map((item) => item.score).filter((score): score is number => typeof score === "number");
-  const finishedCount = Object.keys(summary?.finished_exercise || {}).length;
+  const masteryReport = summary?.post_mastery_report || null;
+  const strengths = masteryReport?.strengths || [];
+  const gaps = masteryReport?.gaps || [];
+  const developing = masteryReport?.developing || [];
+  const evidenceItems = [...strengths, ...gaps, ...developing].flatMap((item) => item.evidence || []);
+  const finishedCount = new Set(evidenceItems.map((item) => item.problem_id)).size;
   const progressPercent = clamp(reportQuery.data?.sessionProgress || 0, 0, 100);
   const totalCount = followUp ? finishedCount : Math.max(finishedCount, 4);
   const assignedExtraCount = (extrasQuery.data?.extra_exercises || []).reduce(
@@ -50,12 +53,17 @@ export function FeedbackWorkspace({ lessonId }: { lessonId: string }) {
   const expectedCount = followUp
     ? Math.max(finishedCount, assignedExtraCount)
     : totalCount;
-  const completedCount = finishedCount || Math.round((progressPercent / 100) * expectedCount);
-  const average = finishedScores.length ? finishedScores.reduce((sum, score) => sum + score, 0) / finishedScores.length : normalizeScore(reportQuery.data?.score ?? 0);
+  const progressCompletedCount = Math.round((progressPercent / 100) * expectedCount);
+  const completedCount = Math.min(
+    expectedCount,
+    Math.max(finishedCount, progressCompletedCount),
+  );
+  const average = typeof masteryReport?.score === "number" ? masteryReport.score : normalizeScore(reportQuery.data?.score ?? 0);
   const scoreTone = average >= 8 ? "strong" : average >= 6 ? "steady" : "focus";
   const scoreCopy = scoreTone === "strong" ? "Nắm khá chắc" : scoreTone === "steady" ? "Đang lên nhịp" : "Cần củng cố";
   const lessonTitle = reportQuery.data?.lessonTitle || "Bài học vừa hoàn thành";
   const hasExtra = !followUp && Boolean(extrasQuery.data?.extra_exercises?.some((group) => group.exercises.length));
+  const nextStep = nextStepCopy(gaps, developing);
 
   if (reportQuery.isLoading && !cachedSummary) return <div className="feedback-shell"><div className="student-skeleton feedback-skeleton" /></div>;
   if (reportQuery.isError && !cachedSummary) return <div className="learning-error"><Flag size={38} /><h1>Chưa tải được feedback</h1><p>Kết quả của bạn vẫn được lưu. Thử tải lại để xem phần tổng hợp.</p><div><Link className="student-secondary-button" href="/student/dashboard">Về Hôm nay</Link><button className="student-primary-button" onClick={() => reportQuery.refetch()}>Thử lại</button></div></div>;
@@ -101,7 +109,8 @@ export function FeedbackWorkspace({ lessonId }: { lessonId: string }) {
           />
         </section>
 
-        <section className="buddy-observation"><span><Lightbulb size={21} weight="fill" /></span><div><h2>Việc nên làm tiếp theo</h2><p>{gaps.length ? "Chọn một điểm cần luyện, giải lại chậm hơn và nói rõ lý do của từng bước." : "Giữ nhịp này: tiếp tục giải thích cách làm trước khi chốt đáp án."}</p></div></section>
+        {developing.length ? <section className="buddy-observation"><span><Lightbulb size={21} weight="fill" /></span><div><h2>Đang hình thành</h2><p>{developing.map((item) => skillLabel(item.skill_id)).join(", ")}</p></div></section> : null}
+        <section className="buddy-observation"><span><Lightbulb size={21} weight="fill" /></span><div><h2>Việc nên làm tiếp theo</h2><p>{nextStep}</p></div></section>
 
         <div className="feedback-actions"><Link className="student-primary-button" href="/student/dashboard"><House size={18} weight="fill" /> Về Hôm nay</Link>{hasExtra && <Link className="student-secondary-button" href={`/student/lesson/extra_${lessonId}/part2`}>Luyện thêm <ArrowRight size={17} /></Link>}</div>
       </div>
@@ -109,13 +118,13 @@ export function FeedbackWorkspace({ lessonId }: { lessonId: string }) {
   );
 }
 
-function FeedbackList({ kind, icon, title, empty, items }: { kind: "strengths" | "gaps"; icon: ReactNode; title: string; empty: string; items: string[] }) {
+function FeedbackList({ kind, icon, title, empty, items }: { kind: "strengths" | "gaps"; icon: ReactNode; title: string; empty: string; items: PostMasterySkillEvidence[] }) {
   const Icon = kind === "strengths" ? Check : ArrowRight;
   return (
     <section className={`feedback-list ${kind}`}>
       <header><span>{icon}</span><h2>{title}</h2></header>
       <div className="feedback-list-body">
-        {items.length ? items.map((item) => <div className="feedback-math-row" key={item}><Icon size={17} weight={kind === "strengths" ? "bold" : "regular"} /><MathContent>{humanize(item)}</MathContent></div>) : <p><Icon size={17} weight={kind === "strengths" ? "bold" : "regular"} /> {empty}</p>}
+        {items.length ? items.map((item) => <div className="feedback-math-row" key={item.skill_id}><Icon size={17} weight={kind === "strengths" ? "bold" : "regular"} /><span><MathContent>{skillLabel(item.skill_id)}</MathContent><small>{evidenceText(item)}</small></span></div>) : <p><Icon size={17} weight={kind === "strengths" ? "bold" : "regular"} /> {empty}</p>}
       </div>
     </section>
   );
@@ -123,18 +132,25 @@ function FeedbackList({ kind, icon, title, empty, items }: { kind: "strengths" |
 function normalizeScore(value: number) { return value > 10 ? value / 10 : value; }
 function formatScore(value: number) { return Number.isInteger(value) ? String(value) : value.toFixed(1); }
 function clamp(value: number, minimum: number, maximum: number) { return Math.min(maximum, Math.max(minimum, value)); }
-function unique(values: string[]) { return Array.from(new Set(values.filter(Boolean))); }
-const FEEDBACK_LABELS: Record<string, string> = {
-  good_logic: "Lập luận logic",
-  careful: "Kiểm tra cẩn thận",
-  definition: "Nắm chắc định nghĩa",
-  method: "Chọn đúng phương pháp",
-  exact_result: "Tính toán chính xác",
-  generalizable: "Biết khái quát cách làm",
-  handles_edge_cases: "Chú ý các trường hợp đặc biệt",
-};
+function evidenceText(item: PostMasterySkillEvidence) {
+  const evidence = item.evidence || [];
+  if (!evidence.length) return item.reason || `${formatScore(item.score)}/10`;
+  return evidence.map((entry) => `${roleLabel(entry.role)} ${formatScore(entry.score)}/10, ${entry.attempts} lần nộp${entry.received_intervention ? ", có gợi ý" : ""}`).join("; ");
+}
+function roleLabel(role: string) {
+  const labels: Record<string, string> = { reinforcement: "Củng cố", challenge: "Thử thách", exploration: "Khám phá", extension: "Mở rộng" };
+  return labels[role] || role;
+}
+function skillLabel(value: string) {
+  return skillDisplayName(value);
+}
 
-function humanize(value: string) {
-  const key = value.trim().toLocaleLowerCase("en").replaceAll(" ", "_");
-  return FEEDBACK_LABELS[key] || value.replaceAll("_", " ").replace(/^./, (character) => character.toLocaleUpperCase("vi"));
+function nextStepCopy(gaps: PostMasterySkillEvidence[], developing: PostMasterySkillEvidence[]) {
+  if (gaps.length) {
+    return `Luyện lại ${skillLabel(gaps[0].skill_id)} trước: làm chậm một bài tương tự, viết rõ từng bước, rồi tự kiểm tra vì sao đáp án đúng.`;
+  }
+  if (developing.length) {
+    return `Giữ nhịp với ${skillLabel(developing[0].skill_id)}: thử giải lại bằng một cách trình bày khác để biến phần đang hình thành thành kỹ năng chắc hơn.`;
+  }
+  return "Một bài làm tốt không kết thúc ở đáp án đúng; nó kết thúc khi bạn giải thích lại được cách nghĩ của mình.";
 }
