@@ -16,6 +16,7 @@ import { motion, useReducedMotion } from "motion/react";
 import { useEffect, useState, type ReactNode } from "react";
 import { MathContent } from "@/components/shared/math-content";
 import { studentApi, studentKeys } from "@/lib/student-api";
+import { skillDisplayName } from "@/lib/skill-labels";
 import type { PostMasterySkillEvidence, StudySessionSummary } from "@/types/contracts";
 
 export function FeedbackWorkspace({ lessonId }: { lessonId: string }) {
@@ -38,9 +39,9 @@ export function FeedbackWorkspace({ lessonId }: { lessonId: string }) {
   const extrasQuery = useQuery({ queryKey: ["student", "extra", lessonId], queryFn: () => studentApi.extraExercises(lessonId), retry: 0 });
   const summary = cachedSummary || reportQuery.data?.sessionSummary || null;
   const masteryReport = summary?.post_mastery_report || null;
-  const strengths = (masteryReport?.strengths || []).slice(0, 3);
-  const gaps = (masteryReport?.gaps || []).slice(0, 3);
-  const developing = (masteryReport?.developing || []).slice(0, 2);
+  const strengths = masteryReport?.strengths || [];
+  const gaps = masteryReport?.gaps || [];
+  const developing = masteryReport?.developing || [];
   const evidenceItems = [...strengths, ...gaps, ...developing].flatMap((item) => item.evidence || []);
   const finishedCount = new Set(evidenceItems.map((item) => item.problem_id)).size;
   const progressPercent = clamp(reportQuery.data?.sessionProgress || 0, 0, 100);
@@ -62,6 +63,7 @@ export function FeedbackWorkspace({ lessonId }: { lessonId: string }) {
   const scoreCopy = scoreTone === "strong" ? "Nắm khá chắc" : scoreTone === "steady" ? "Đang lên nhịp" : "Cần củng cố";
   const lessonTitle = reportQuery.data?.lessonTitle || "Bài học vừa hoàn thành";
   const hasExtra = !followUp && Boolean(extrasQuery.data?.extra_exercises?.some((group) => group.exercises.length));
+  const nextStep = nextStepCopy(gaps, developing);
 
   if (reportQuery.isLoading && !cachedSummary) return <div className="feedback-shell"><div className="student-skeleton feedback-skeleton" /></div>;
   if (reportQuery.isError && !cachedSummary) return <div className="learning-error"><Flag size={38} /><h1>Chưa tải được feedback</h1><p>Kết quả của bạn vẫn được lưu. Thử tải lại để xem phần tổng hợp.</p><div><Link className="student-secondary-button" href="/student/dashboard">Về Hôm nay</Link><button className="student-primary-button" onClick={() => reportQuery.refetch()}>Thử lại</button></div></div>;
@@ -108,7 +110,7 @@ export function FeedbackWorkspace({ lessonId }: { lessonId: string }) {
         </section>
 
         {developing.length ? <section className="buddy-observation"><span><Lightbulb size={21} weight="fill" /></span><div><h2>Đang hình thành</h2><p>{developing.map((item) => skillLabel(item.skill_id)).join(", ")}</p></div></section> : null}
-        <section className="buddy-observation"><span><Lightbulb size={21} weight="fill" /></span><div><h2>Việc nên làm tiếp theo</h2><p>{gaps.length ? "Chọn một kỹ năng cần luyện, giải lại chậm hơn và nói rõ lý do của từng bước." : "Giữ nhịp này: tiếp tục giải thích cách làm trước khi chốt đáp án."}</p>{masteryReport?.criteria?.length ? <small>{masteryReport.criteria.map((item) => `${item.label}: ${item.description}`).join(" ")}</small> : null}</div></section>
+        <section className="buddy-observation"><span><Lightbulb size={21} weight="fill" /></span><div><h2>Việc nên làm tiếp theo</h2><p>{nextStep}</p></div></section>
 
         <div className="feedback-actions"><Link className="student-primary-button" href="/student/dashboard"><House size={18} weight="fill" /> Về Hôm nay</Link>{hasExtra && <Link className="student-secondary-button" href={`/student/lesson/extra_${lessonId}/part2`}>Luyện thêm <ArrowRight size={17} /></Link>}</div>
       </div>
@@ -140,19 +142,15 @@ function roleLabel(role: string) {
   return labels[role] || role;
 }
 function skillLabel(value: string) {
-  return humanize(value.includes("#") ? value.split("#").at(-1) || value : value);
+  return skillDisplayName(value);
 }
-const FEEDBACK_LABELS: Record<string, string> = {
-  good_logic: "Lập luận logic",
-  careful: "Kiểm tra cẩn thận",
-  definition: "Nắm chắc định nghĩa",
-  method: "Chọn đúng phương pháp",
-  exact_result: "Tính toán chính xác",
-  generalizable: "Biết khái quát cách làm",
-  handles_edge_cases: "Chú ý các trường hợp đặc biệt",
-};
 
-function humanize(value: string) {
-  const key = value.trim().toLocaleLowerCase("en").replaceAll(" ", "_");
-  return FEEDBACK_LABELS[key] || value.replaceAll("_", " ").replace(/^./, (character) => character.toLocaleUpperCase("vi"));
+function nextStepCopy(gaps: PostMasterySkillEvidence[], developing: PostMasterySkillEvidence[]) {
+  if (gaps.length) {
+    return `Luyện lại ${skillLabel(gaps[0].skill_id)} trước: làm chậm một bài tương tự, viết rõ từng bước, rồi tự kiểm tra vì sao đáp án đúng.`;
+  }
+  if (developing.length) {
+    return `Giữ nhịp với ${skillLabel(developing[0].skill_id)}: thử giải lại bằng một cách trình bày khác để biến phần đang hình thành thành kỹ năng chắc hơn.`;
+  }
+  return "Một bài làm tốt không kết thúc ở đáp án đúng; nó kết thúc khi bạn giải thích lại được cách nghĩ của mình.";
 }
