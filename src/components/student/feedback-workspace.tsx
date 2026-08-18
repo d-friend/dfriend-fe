@@ -52,7 +52,11 @@ export function FeedbackWorkspace({ lessonId }: { lessonId: string }) {
   const expectedCount = followUp
     ? Math.max(finishedCount, assignedExtraCount)
     : totalCount;
-  const completedCount = finishedCount || Math.round((progressPercent / 100) * expectedCount);
+  const progressCompletedCount = Math.round((progressPercent / 100) * expectedCount);
+  const completedCount = Math.min(
+    expectedCount,
+    Math.max(finishedCount, progressCompletedCount),
+  );
   const average = typeof masteryReport?.score === "number" ? masteryReport.score : normalizeScore(reportQuery.data?.score ?? 0);
   const scoreTone = average >= 8 ? "strong" : average >= 6 ? "steady" : "focus";
   const scoreCopy = scoreTone === "strong" ? "Nắm khá chắc" : scoreTone === "steady" ? "Đang lên nhịp" : "Cần củng cố";

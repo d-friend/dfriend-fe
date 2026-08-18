@@ -378,6 +378,7 @@ export interface StudentAssignment {
 export interface StudentRoadmapItem {
   id: string;
   lessonId: string;
+  lesson_id?: string;
   title: string;
   status: "completed" | "active" | "locked";
   extra_exercises?: Array<{
