@@ -347,10 +347,15 @@ export interface ApiErrorEnvelope {
 
 export interface StudentMetrics {
   student_id: string;
+  studentId?: string;
   correctness_score: number | null;
   independence_score: number | null;
   reasoning_score: number | null;
   transfer_score: number | null;
+  correctnessScore?: number | null;
+  independenceScore?: number | null;
+  reasoningScore?: number | null;
+  transferScore?: number | null;
 }
 
 export interface StudentClass {
