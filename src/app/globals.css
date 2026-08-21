@@ -4522,6 +4522,153 @@ button:disabled {
   letter-spacing: -0.025em;
 }
 
+.mastery-arc-review {
+  margin-top: 1rem;
+}
+
+.mastery-arc-grid {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.mastery-arc-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+  background: var(--surface-raised);
+  padding: 0.85rem;
+}
+
+.mastery-arc-card[data-complete="true"] {
+  border-color: color-mix(in srgb, var(--success) 48%, var(--line));
+}
+
+.mastery-arc-card > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.mastery-arc-card > header span {
+  color: var(--brand-strong);
+  font-size: 0.62rem;
+  font-weight: 720;
+  text-transform: uppercase;
+}
+
+.mastery-arc-card > header h3 {
+  margin: 0.12rem 0 0;
+  font-size: 0.92rem;
+}
+
+.mastery-arc-card > header b {
+  border-radius: 999px;
+  background: var(--surface-muted);
+  padding: 0.25rem 0.5rem;
+  font-size: 0.72rem;
+}
+
+.mastery-slot-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.mastery-slot-card {
+  min-width: 0;
+  min-height: 18rem;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  background: var(--surface);
+  padding: 0.65rem;
+}
+
+.mastery-slot-card[data-missing="true"] {
+  border-style: dashed;
+  background: var(--surface-muted);
+}
+
+.mastery-slot-head {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr);
+  align-items: start;
+  gap: 0.55rem;
+  min-height: 3.2rem;
+  margin-bottom: 0.55rem;
+}
+
+.mastery-slot-head > span {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.45rem;
+  background: var(--brand-soft);
+  color: var(--brand-strong);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.mastery-slot-head strong,
+.mastery-slot-head small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.mastery-slot-head strong {
+  font-size: 0.8rem;
+}
+
+.mastery-slot-head small {
+  margin-top: 0.15rem;
+  color: var(--muted);
+  font-size: 0.66rem;
+}
+
+.mastery-slot-card .draft-problem-list {
+  gap: 0;
+}
+
+.mastery-slot-card .draft-problem-list article {
+  padding: 0.65rem;
+}
+
+.mastery-slot-card .draft-problem-list article header {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.mastery-slot-card .draft-problem-list article header > span {
+  display: none;
+}
+
+.mastery-slot-card .draft-problem-list article header button {
+  width: 100%;
+  justify-content: center;
+}
+
+.mastery-slot-empty {
+  display: grid;
+  place-items: center;
+  min-height: 10rem;
+  border-radius: 0.45rem;
+  color: var(--muted);
+  text-align: center;
+  font-size: 0.75rem;
+}
+
+@media (max-width: 1180px) {
+  .mastery-slot-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .mastery-slot-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .data-summary {
   display: grid;
   gap: 0.35rem;

@@ -103,6 +103,16 @@ export interface FollowUpDraftResult {
   };
 }
 
+export interface CompletePoolResult {
+  draft: Record<string, unknown>;
+  completed_slot_ids: string[];
+  failed_slots: Array<{
+    slot_id: string;
+    role: string;
+    reason: string;
+  }>;
+}
+
 export const adminApi = {
   me: async () => (await apiClient.get<AuthUser>("/auth/me")).data,
   overview: async () => (await apiClient.get<AdminOverview>("/admin/overview")).data,
@@ -363,7 +373,7 @@ export const teacherApi = {
     ).data,
   completeLessonReviewPool: async (lessonId: string) =>
     (
-      await apiClient.post<Record<string, unknown>>(
+      await apiClient.post<CompletePoolResult>(
         `/exercises/ai-drafts/${lessonId}/review/complete-pool`,
         undefined,
         { timeout: 360_000 },
