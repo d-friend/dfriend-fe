@@ -89,6 +89,11 @@ export function LessonAuthoring() {
     queryFn: () => teacherApi.report(reportId as string),
     enabled: Boolean(reportId),
   });
+  const followUpPrefill = useQuery({
+    queryKey: ["teacher", "copilot", reportId, "follow-up-plan"],
+    queryFn: () => teacherApi.followUpPlan(reportId as string),
+    enabled: Boolean(reportId),
+  });
   const topics = useMemo(() => curriculum.data?.find((item) => item.value === subject)?.topics || [], [curriculum.data, subject]);
   const concepts = useMemo(() => topics.find((item) => item.value === topic)?.concepts || [], [topics, topic]);
   const availableSkills = useQuery({ queryKey: ["curriculum", "skills", subject, topic, concept], queryFn: () => teacherApi.curriculumSkills(subject, topic, concept), enabled: Boolean(subject && topic && concept), staleTime: Infinity });
@@ -140,31 +145,32 @@ export function LessonAuthoring() {
 
   useEffect(() => {
     if (!reportPrefill.data || !reportId || appliedReportId.current === reportId) return;
+    if (!followUpPrefill.data && followUpPrefill.isLoading) return;
     appliedReportId.current = reportId;
     const data = reportPrefill.data;
-    const weakSkills = uniqueStrings([
-      ...(data.report?.top_weak_skill_ids || []),
-      ...(data.report?.gaps || []),
-    ]).slice(0, 4);
-    const weakSkillText = weakSkills.length
-      ? weakSkills.map(readableSkill).join(", ")
-      : "các kỹ năng lớp còn yếu trong báo cáo";
+    const mainPlan = followUpPrefill.data?.main;
+    const plannedConcept = parseConceptKey(mainPlan?.concept_key || "");
+    const plannedSkills = uniqueStrings(mainPlan?.target_skill_ids || []).slice(0, 4);
+    const skillText = plannedSkills.length
+      ? plannedSkills.map(readableSkill).join(", ")
+      : "các kỹ năng quan trọng của bài tiếp theo";
     setPhase("goal");
     setDescription("");
     setFile(null);
     setDraftExerciseId("");
     setPrecheckData(null);
     setError("");
-    setSubject(data.subject || "");
-    setTopic(data.topic || "");
-    setConcept(data.concept || "");
+    setSubject(plannedConcept?.subject || data.subject || "");
+    setTopic(plannedConcept?.topic || data.topic || "");
+    setConcept(plannedConcept?.concept || data.concept || "");
     setClassIds(data.classIds || []);
+    setSelectedSkills(plannedSkills);
     setTitle(`Bài tiếp theo: ${data.title || "báo cáo gần nhất"}`);
     setLessonGoal(
-      `Sau bài này, học sinh củng cố được ${weakSkillText}. ` +
+      `Sau bài này, học sinh làm được ${skillText}. ` +
         `Ưu tiên sửa đúng các lỗi được phát hiện sau bài “${data.title || "gần nhất"}”.`,
     );
-  }, [reportId, reportPrefill.data]);
+  }, [reportId, reportPrefill.data, followUpPrefill.data, followUpPrefill.isLoading]);
 
   useEffect(() => {
     if (!storageReady || !storageKey) return;
@@ -548,6 +554,11 @@ function uniqueStrings(values: string[]) { return Array.from(new Set(values.filt
 function readableSkill(value: string) {
   const leaf = value.split("#").pop()?.split(":").pop() || value;
   return leaf.replace(/[-_]+/g, " ").trim();
+}
+function parseConceptKey(value: string) {
+  const [subject, topic, concept] = value.split(":");
+  if (!subject || !topic || !concept) return null;
+  return { subject, topic, concept };
 }
 function originLabel(value: string) {
   if (value === "extracted") return "Trích nguyên từ tài liệu";

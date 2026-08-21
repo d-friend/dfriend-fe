@@ -70,11 +70,16 @@ export const studentApi = {
     (await apiClient.get<StudySession>(`/ai-session/active/${lessonId}`)).data,
   startSession: async (lessonId: string, reset = false) =>
     (await apiClient.post<StudySession>("/ai-session/start", { lessonId, reset })).data,
-  closeSession: async (sessionId: string, lessonId: string) =>
+  closeSession: async (
+    sessionId: string,
+    lessonId: string,
+    options?: { finishEarly?: boolean },
+  ) =>
     (
       await apiClient.post<StudySessionSummary>("/ai-session/close", {
         sessionId,
         lessonId,
+        ...(options?.finishEarly ? { finishEarly: true } : {}),
       })
     ).data,
   report: async (lessonId: string) =>

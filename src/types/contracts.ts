@@ -81,13 +81,46 @@ export interface AdminOverview {
   }>;
   recentActivities: Array<{
     id: string;
-    userId: string;
+    actorUserId?: string | null;
+    actorRole?: string | null;
+    studentId?: string | null;
     eventType: string;
     source: string;
     classId?: string | null;
     lessonId?: string | null;
+    sessionId?: string | null;
+    subject?: string | null;
+    topic?: string | null;
+    conceptKey?: string | null;
+    metadata?: Record<string, unknown> | null;
+    ip?: string | null;
+    userAgent?: string | null;
     createdAt: string;
   }>;
+}
+
+export interface ProductEvent {
+  id: string;
+  eventType: string;
+  source: string;
+  actorUserId?: string | null;
+  actorRole?: string | null;
+  studentId?: string | null;
+  classId?: string | null;
+  lessonId?: string | null;
+  sessionId?: string | null;
+  subject?: string | null;
+  topic?: string | null;
+  conceptKey?: string | null;
+  metadata?: Record<string, unknown> | null;
+  ip?: string | null;
+  userAgent?: string | null;
+  createdAt: string;
+}
+
+export interface ProductEventPage {
+  data: ProductEvent[];
+  nextCursor: string | null;
 }
 
 export interface AdminOperations {

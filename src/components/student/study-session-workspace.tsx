@@ -44,6 +44,7 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
   const [session, setSession] = useState<StudySession | null>(null);
   const [sessionError, setSessionError] = useState("");
   const [uiState, setUiState] = useState<SessionUiState>("initialising");
+  const [lastCloseWasEarly, setLastCloseWasEarly] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([{ id: "welcome", role: "buddy", content: "Mình là bạn học của bạn trong buổi này. Mình sẽ nghe cách bạn nghĩ, hỏi lại khi cần và cùng gỡ chỗ bị kẹt, nhưng không làm hộ bài." }]);
   const [message, setMessage] = useState("");
   const [answer, setAnswer] = useState("");
@@ -139,11 +140,16 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
   }
   function submitAnswer(event: FormEvent) { event.preventDefault(); const value = answer; setAnswer(""); void sendTurn(value, true); }
 
-  async function closeSession() {
+  async function closeSession(finishEarly = false) {
     if (!session?.session_id) return;
+    if (finishEarly) {
+      const confirmed = window.confirm("Kết thúc sớm phiên học? Bạn sẽ nhận feedback dựa trên phần đã làm. Các bài chưa làm sẽ không được tính là điểm yếu.");
+      if (!confirmed) return;
+    }
+    setLastCloseWasEarly(finishEarly);
     setUiState("closing");
     try {
-      const summary = await studentApi.closeSession(session.session_id, lessonId);
+      const summary = await studentApi.closeSession(session.session_id, lessonId, { finishEarly });
       if (summary.status === "error") throw new Error(summary.message || "Chưa thể kết thúc phiên học.");
       sessionStorage.setItem(`dfriend:feedback:${lessonId}`, JSON.stringify(summary));
       await queryClient.invalidateQueries({ queryKey: studentKeys.metrics });
@@ -162,7 +168,10 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
       <header className="learning-header study-header">
         <Link href={followUp ? `/student/report/${parentLessonId}` : `/student/lesson/${lessonId}/part1`}><ArrowLeft size={19} /><span>{followUp ? "Feedback trước" : "Session 1"}</span></Link>
         <div className="study-header-center"><span><Mountains size={16} weight="fill" /> Đường lên đỉnh</span><MountainProgress problems={problems} completedCount={completedCount} currentProblemId={activeProblemId} waiting={uiState === "awaiting_reasoning" || uiState === "farming"} /></div>
-        <div className="learning-counter"><strong>{completedCount}/{problems.length || 4}</strong><span>bài</span></div>
+        <div className="study-header-actions">
+          {!allComplete && session?.session_id ? <button type="button" className="study-early-finish" onClick={() => void closeSession(true)} disabled={uiState === "streaming" || uiState === "closing"}><Flag size={14} weight="fill" /><span>{uiState === "closing" ? "Đang tổng hợp" : "Kết thúc sớm"}</span></button> : null}
+          <div className="learning-counter"><strong>{completedCount}/{problems.length || 4}</strong><span>bài</span></div>
+        </div>
       </header>
 
       {uiState === "initialising" && !session ? <StudyLoading /> : session && currentProblem ? (
@@ -185,7 +194,7 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
 
           <section className="buddy-pane" data-mobile-active={mobileTab === "buddy"}>
             <div className="buddy-title"><div><span className="buddy-mark"><Sparkle size={18} weight="fill" /></span><div><strong>Bạn học AI</strong><small>Gợi mở, không làm hộ</small></div></div>{uiState === "streaming" && <span className="buddy-typing">Đang đọc cách bạn nghĩ</span>}</div>
-            <div className="buddy-transcript" ref={transcriptRef}>{messages.map((item) => <article key={item.id} data-role={item.role} data-degraded={item.degraded}><span>{item.role === "buddy" ? "Study Buddy" : "Bạn"}</span>{item.content ? <MathContent>{item.content}</MathContent> : <div className="markdown-body"><TypingPlaceholder /></div>}</article>)}{uiState === "awaiting_reasoning" && <StateNotice type="reasoning" />}{uiState === "farming" && <StateNotice type="farming" />}{uiState === "degraded" && <StateNotice type="degraded" />}{allComplete && <div className="summit-card"><Flag size={25} weight="fill" /><div><strong>Bạn đã tới đỉnh của phiên học</strong><span>Kết thúc để nhận phản hồi về điểm mạnh và phần nên luyện tiếp.</span></div><button className="student-primary-button" onClick={closeSession} disabled={uiState === "closing"}>{uiState === "closing" ? "Đang tổng hợp" : "Nhận feedback"}</button></div>}{sessionError && session && <div className="student-form-error" role="alert">{sessionError} <button onClick={closeSession}>Thử lại</button></div>}</div>
+            <div className="buddy-transcript" ref={transcriptRef}>{messages.map((item) => <article key={item.id} data-role={item.role} data-degraded={item.degraded}><span>{item.role === "buddy" ? "Study Buddy" : "Bạn"}</span>{item.content ? <MathContent>{item.content}</MathContent> : <div className="markdown-body"><TypingPlaceholder /></div>}</article>)}{uiState === "awaiting_reasoning" && <StateNotice type="reasoning" />}{uiState === "farming" && <StateNotice type="farming" />}{uiState === "degraded" && <StateNotice type="degraded" />}{allComplete && <div className="summit-card"><Flag size={25} weight="fill" /><div><strong>Bạn đã tới đỉnh của phiên học</strong><span>Kết thúc để nhận phản hồi về điểm mạnh và phần nên luyện tiếp.</span></div><button className="student-primary-button" onClick={() => void closeSession()} disabled={uiState === "closing"}>{uiState === "closing" ? "Đang tổng hợp" : "Nhận feedback"}</button></div>}{sessionError && session && <div className="student-form-error" role="alert">{sessionError} <button onClick={() => void closeSession(lastCloseWasEarly)}>Thử lại</button></div>}</div>
             <form className="buddy-composer" onSubmit={submitChat}><label htmlFor="buddy-message">Trao đổi cách làm</label><div><textarea ref={buddyMessageRef} id="buddy-message" rows={1} value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={handleChatKeyDown} placeholder="Mình đang nghĩ là..." disabled={uiState === "streaming" || uiState === "closing"} /><button aria-label="Gửi tin nhắn" disabled={!canSendChat}><PaperPlaneTilt size={19} weight="fill" /></button></div></form>
           </section>
         </div>

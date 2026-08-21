@@ -13,6 +13,7 @@ import type {
   CopilotReportSummary,
   CurriculumSubject,
   ExerciseDocument,
+  ProductEventPage,
   StudentInClass,
   TeacherClass,
   TeacherInvite,
@@ -71,10 +72,61 @@ export function isApiErrorStatus(error: unknown, status: number) {
   return axios.isAxiosError(error) && error.response?.status === status;
 }
 
+export interface FollowUpSuggestion {
+  kind: "main" | "remedial" | "advanced";
+  concept_key: string;
+  target_student_ids?: string[] | null;
+  target_skill_ids: string[];
+  reason: string;
+  empty_reason?: string | null;
+}
+
+export interface FollowUpPlan {
+  class_id: string;
+  lesson_id: string;
+  source_concept_key: string;
+  main: FollowUpSuggestion;
+  groups: FollowUpSuggestion[];
+  generated_at: string;
+  studentNames?: Record<string, string>;
+}
+
+export interface FollowUpDraftResult {
+  created: boolean;
+  draft: {
+    id: string;
+    groupType: "remedial" | "advanced";
+    studentIds: string[];
+    exercises: Array<Record<string, unknown>>;
+    summary: string;
+    aiLessonId: string;
+  };
+}
+
 export const adminApi = {
   me: async () => (await apiClient.get<AuthUser>("/auth/me")).data,
   overview: async () => (await apiClient.get<AdminOverview>("/admin/overview")).data,
   operations: async () => (await apiClient.get<AdminOperations>("/admin/operations")).data,
+  productEvents: async (params?: {
+    limit?: number;
+    cursor?: string | null;
+    eventType?: string;
+    actorUserId?: string;
+    classId?: string;
+    lessonId?: string;
+  }) =>
+    (
+      await apiClient.get<ProductEventPage>("/admin/product-events", {
+        params: {
+          ...(params?.limit ? { limit: params.limit } : {}),
+          ...(params?.cursor ? { cursor: params.cursor } : {}),
+          ...(params?.eventType ? { eventType: params.eventType } : {}),
+          ...(params?.actorUserId ? { actorUserId: params.actorUserId } : {}),
+          ...(params?.classId ? { classId: params.classId } : {}),
+          ...(params?.lessonId ? { lessonId: params.lessonId } : {}),
+        },
+      })
+    ).data,
   users: async (params?: { query?: string; role?: AdminUser["role"] | "" }) => {
     const requestParams = {
       ...(params?.query ? { query: params.query } : {}),
@@ -362,5 +414,25 @@ export const teacherApi = {
       }>(`/teacher/copilot/${lessonId}/extra-exercises`, undefined, {
         timeout: 360_000,
       })
+    ).data,
+  followUpPlan: async (lessonId: string) =>
+    (await apiClient.get<FollowUpPlan>(`/teacher/copilot/${lessonId}/follow-up-plan`)).data,
+  createFollowUpDraft: async (
+    lessonId: string,
+    payload: {
+      kind: "remedial" | "advanced";
+      conceptKey: string;
+      studentIds: string[];
+      skillIds: string[];
+      lessonGoal?: string;
+      editedRecommendation?: boolean;
+    },
+  ) =>
+    (
+      await apiClient.post<FollowUpDraftResult>(
+        `/teacher/copilot/${lessonId}/follow-up-drafts`,
+        payload,
+        { timeout: 360_000 },
+      )
     ).data,
 };

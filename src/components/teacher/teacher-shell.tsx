@@ -50,7 +50,7 @@ export function TeacherShell({ children }: { children: ReactNode }) {
   const [toast, setToast] = useState<TeacherNotification | null>(null);
 
   const copilotMode = pathname.startsWith("/teacher/copilot") || pathname.startsWith("/teacher/documents");
-  const fixedMain = pathname.startsWith("/teacher/copilot");
+  const fixedMain = pathname.startsWith("/teacher/copilot") && !pathname.endsWith("/extra");
   const immersiveLesson = pathname.startsWith("/teacher/lessons/");
 
   const classesQuery = useQuery({
