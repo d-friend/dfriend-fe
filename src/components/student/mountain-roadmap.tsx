@@ -67,4 +67,4 @@ export function ProfileWorkspace() {
 }
 
 function Score({ label, value }: { label: string; value: number }) { const score = value > 10 ? value / 10 : value; return <div><span>{label}</span><strong>{Number.isInteger(score) ? score : score.toFixed(1)}</strong><small>/10</small></div>; }
-function roadmapLessonId(item: { id: string; lessonId?: string; lesson_id?: string }) { return item.lessonId || item.lesson_id || item.id; }
+function roadmapLessonId(item: { id: string }) { return item.id; }

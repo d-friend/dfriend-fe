@@ -85,9 +85,9 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
   const hasNonMasteryContent = contentWithoutMastery.knowledgeSections.length > 0 || contentWithoutMastery.knowledgeProblems.length > 0 || contentWithoutMastery.masteryProblems.length > 0;
 
   const approve = useMutation({
-    mutationFn: () => teacherApi.approveLessonReview(lessonId),
-    onSuccess: () => { setError(""); setBlockers([]); void draftQuery.refetch(); },
-    onError: (approvalError) => setError(getApiErrorMessage(approvalError)),
+    mutationFn: () => teacherApi.approveLessonReview(lessonId, revision),
+    onSuccess: async () => { setError(""); setBlockers([]); await draftQuery.refetch(); },
+    onError: async (approvalError) => { setError(getApiErrorMessage(approvalError)); await draftQuery.refetch(); },
   });
   const regenerate = useMutation({
     mutationFn: () => {
@@ -95,23 +95,24 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
       if (targets.length !== rejected.size) {
         throw new Error("Một số câu trong bản nháp thiếu mã nguồn để soạn lại an toàn.");
       }
-      return teacherApi.regenerateLessonReview(lessonId, targets);
+      return teacherApi.regenerateLessonReview(lessonId, targets, revision);
     },
-    onSuccess: () => { setRejected(new Set()); setError(""); void draftQuery.refetch(); },
-    onError: (regenerationError) => setError(getApiErrorMessage(regenerationError, "Không thể soạn lại các câu đã chọn.")),
+    onSuccess: async () => { setRejected(new Set()); setError(""); await draftQuery.refetch(); },
+    onError: async (regenerationError) => { setError(getApiErrorMessage(regenerationError, "Không thể soạn lại các câu đã chọn.")); await draftQuery.refetch(); },
   });
   const completePool = useMutation({
-    mutationFn: () => teacherApi.completeLessonReviewPool(lessonId),
-    onSuccess: () => { setError(""); setBlockers([]); void draftQuery.refetch(); },
-    onError: (completionError) => setError(getApiErrorMessage(completionError, "Không thể bù bài còn thiếu.")),
+    mutationFn: () => teacherApi.completeLessonReviewPool(lessonId, revision),
+    onSuccess: async () => { setError(""); setBlockers([]); await draftQuery.refetch(); },
+    onError: async (completionError) => { setError(getApiErrorMessage(completionError, "Không thể bù bài còn thiếu.")); await draftQuery.refetch(); },
   });
   const publish = useMutation({
-    mutationFn: () => followUp ? teacherApi.publishFollowUpDraft(lessonId) : teacherApi.publishCopilotDraft(lessonId, { classIds: selectedClassIds, deadline: new Date(deadline).toISOString(), title: title.trim() }),
+    mutationFn: () => followUp ? teacherApi.publishFollowUpDraft(lessonId, revision) : teacherApi.publishCopilotDraft(lessonId, { classIds: selectedClassIds, deadline: new Date(deadline).toISOString(), title: title.trim(), expectedRevision: revision }),
     onSuccess: () => setPublished(true),
-    onError: (publishError) => {
+    onError: async (publishError) => {
       const body = (publishError as { response?: { data?: { blockers?: Array<Record<string, unknown>>; message?: string }; message?: string } }).response?.data;
       setBlockers(body?.blockers || []);
       setError(getApiErrorMessage(publishError, "Bản nháp chưa đủ điều kiện xuất bản."));
+      await draftQuery.refetch();
     },
   });
 
@@ -119,7 +120,12 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
   if (draftQuery.isError) return <div className="lesson-immersive"><div className="center-state"><WarningCircle size={30} /><h1>Không mở được bản nháp</h1><p>{getApiErrorMessage(draftQuery.error)}</p><button className="secondary-button" onClick={() => router.back()}>Quay lại</button></div></div>;
   if (published) return <div className="lesson-immersive"><div className="publish-success"><span><CheckCircle size={32} weight="fill" /></span><h1>Đã xuất bản bài học</h1><p>{followUp ? "Bài tập đã được gửi đúng nhóm học sinh." : "Các lớp đã nhận được bài học mới."}</p><button className="primary-button" onClick={() => router.push(selectedClassIds[0] ? `/teacher/classes/${selectedClassIds[0]}?tab=learning-path` : "/teacher/classes")}>Về lớp học</button></div></div>;
 
-  const publishDisabled = publish.isPending || !approved || !hasCompleteArc || rejected.size > 0 || (!followUp && (selectedClassIds.length === 0 || !title.trim()));
+  const reviewMutationPending =
+    approve.isPending ||
+    regenerate.isPending ||
+    completePool.isPending ||
+    publish.isPending;
+  const publishDisabled = reviewMutationPending || !approved || !hasCompleteArc || rejected.size > 0 || (!followUp && (selectedClassIds.length === 0 || !title.trim()));
 
   return (
     <section className="lesson-immersive draft-review-page">
@@ -127,9 +133,9 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
         <button className="text-button" onClick={() => router.back()}><ArrowLeft size={16} /> Quay lại</button>
         <span className={`review-state ${approved ? "approved" : "draft"}`}><ShieldCheck size={16} /> {approved ? `Đã duyệt · bản ${revision}` : `Bản nháp · bản ${revision}`}</span>
         <div>
-          {rejected.size > 0 && <button className="secondary-button" onClick={() => regenerate.mutate()} disabled={regenerate.isPending}>{regenerate.isPending ? <CircleNotch className="animate-spin" size={16} /> : <ArrowsClockwise size={16} />} Soạn lại {rejected.size} câu</button>}
-          {poolDeficitCount > 0 && <button className="secondary-button" onClick={() => completePool.mutate()} disabled={completePool.isPending}>{completePool.isPending ? <CircleNotch className="animate-spin" size={16} /> : <ArrowsClockwise size={16} />} Bù {poolDeficitCount} bài còn thiếu</button>}
-          {!approved && <button className="secondary-button" onClick={() => approve.mutate()} disabled={approve.isPending || !hasCompleteArc || rejected.size > 0}>{approve.isPending ? <CircleNotch className="animate-spin" size={16} /> : <Check size={16} />} Duyệt arc sẵn sàng</button>}
+          {rejected.size > 0 && <button className="secondary-button" onClick={() => regenerate.mutate()} disabled={reviewMutationPending}>{regenerate.isPending ? <CircleNotch className="animate-spin" size={16} /> : <ArrowsClockwise size={16} />} Soạn lại {rejected.size} câu</button>}
+          {poolDeficitCount > 0 && <button className="secondary-button" onClick={() => completePool.mutate()} disabled={reviewMutationPending}>{completePool.isPending ? <CircleNotch className="animate-spin" size={16} /> : <ArrowsClockwise size={16} />} Bù {poolDeficitCount} bài còn thiếu</button>}
+          {!approved && <button className="secondary-button" onClick={() => approve.mutate()} disabled={reviewMutationPending || !hasCompleteArc || rejected.size > 0}>{approve.isPending ? <CircleNotch className="animate-spin" size={16} /> : <Check size={16} />} Duyệt arc sẵn sàng</button>}
           <button className="primary-button" disabled={publishDisabled} onClick={() => publish.mutate()}><Check size={16} /> {publish.isPending ? "Đang xuất bản" : "Xuất bản"}</button>
         </div>
       </header>

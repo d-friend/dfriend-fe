@@ -362,46 +362,50 @@ export const teacherApi = {
         `/teacher/copilot/drafts/${lessonId}`,
       )
     ).data,
-  approveGenerated: async (lessonId: string) =>
+  approveGenerated: async (lessonId: string, expectedRevision: number) =>
     (
       await apiClient.post<Record<string, unknown>>(
         `/exercises/ai-drafts/${lessonId}/approve-generated`,
+        { expectedRevision },
       )
     ).data,
-  approveLessonReview: async (lessonId: string) =>
+  approveLessonReview: async (lessonId: string, expectedRevision: number) =>
     (
       await apiClient.post<Record<string, unknown>>(
         `/exercises/ai-drafts/${lessonId}/review/approve`,
+        { expectedRevision },
       )
     ).data,
-  reopenLessonReview: async (lessonId: string) =>
+  reopenLessonReview: async (lessonId: string, expectedRevision: number) =>
     (
       await apiClient.post<Record<string, unknown>>(
         `/exercises/ai-drafts/${lessonId}/review/reopen`,
+        { expectedRevision },
       )
     ).data,
-  completeLessonReviewPool: async (lessonId: string) =>
+  completeLessonReviewPool: async (lessonId: string, expectedRevision: number) =>
     (
       await apiClient.post<CompletePoolResult>(
         `/exercises/ai-drafts/${lessonId}/review/complete-pool`,
-        undefined,
+        { expectedRevision },
         { timeout: 360_000 },
       )
     ).data,
   regenerateLessonReview: async (
     lessonId: string,
     targets: Array<{ kind: "mastery" | "knowledge_checkpoint"; id?: string; index?: number }>,
+    expectedRevision: number,
   ) =>
     (
       await apiClient.post<Record<string, unknown>>(
         `/exercises/ai-drafts/${lessonId}/review/regenerate`,
-        { targets },
+        { targets, expectedRevision },
         { timeout: 360_000 },
       )
     ).data,
   publishCopilotDraft: async (
     lessonId: string,
-    payload: { classIds: string[]; deadline?: string; title?: string },
+    payload: { classIds: string[]; deadline?: string; title?: string; expectedRevision: number },
   ) =>
     (
       await apiClient.post<Record<string, unknown>>(
@@ -409,10 +413,11 @@ export const teacherApi = {
         payload,
       )
     ).data,
-  publishFollowUpDraft: async (aiLessonId: string) =>
+  publishFollowUpDraft: async (aiLessonId: string, expectedRevision: number) =>
     (
       await apiClient.post<Record<string, unknown>>(
         `/teacher/copilot/extra-exercises/${aiLessonId}/publish`,
+        { expectedRevision },
       )
     ).data,
   generateFollowUps: async (lessonId: string) =>
