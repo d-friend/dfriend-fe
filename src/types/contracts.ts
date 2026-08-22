@@ -304,6 +304,9 @@ export interface CopilotReportSummary {
   topic: string;
   classNames: string;
   classIds: string[];
+  classId?: string;
+  completedStudents?: number;
+  totalStudents?: number;
   status: "PENDING" | "ANALYSING" | "REPORT_READY" | "FAILED";
   reportedAt: string | null;
   acknowledgedAt: string | null;

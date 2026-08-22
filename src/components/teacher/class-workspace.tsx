@@ -62,6 +62,15 @@ export function ClassWorkspace({ classId }: { classId: string }) {
       report.classIds?.includes(classId) || report.classNames.split(",").map((name) => name.trim()).includes(currentClass.class_name),
     );
   }, [reportsQuery.data, currentClass, classId]);
+  const selectedReportSummary = classReports.find(
+    (report) =>
+      selectedReport !== null && reportSelectionIds(report).includes(selectedReport),
+  );
+  const selectedReportLesson = roadmapQuery.data?.find(
+    (lesson) =>
+      lesson.id === selectedReportSummary?.publicationId ||
+      lesson.lessonId === selectedReportSummary?.lessonId,
+  );
 
   const filteredStudents = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase("vi");
@@ -121,7 +130,7 @@ export function ClassWorkspace({ classId }: { classId: string }) {
 
       <aside className="class-detail" aria-label="Chi tiết">
         {hasSelection && <button className="detail-back" onClick={clearSelection}><ArrowLeft size={17} /> Quay lại danh sách</button>}
-        {selectedStudent ? <StudentDetail classId={classId} studentId={selectedStudent} studentName={studentsQuery.data?.find((student) => student.student_id === selectedStudent)?.full_name || "Học sinh"} /> : selectedLesson ? <LessonDetail lesson={roadmapQuery.data?.find((lesson) => lesson.id === selectedLesson || lesson.lessonId === selectedLesson)} studentCount={currentClass.student_count} /> : selectedReport ? <ReportDetail lessonId={selectedReport} /> : <DetailEmpty tab={tab} />}
+        {selectedStudent ? <StudentDetail classId={classId} studentId={selectedStudent} studentName={studentsQuery.data?.find((student) => student.student_id === selectedStudent)?.full_name || "Học sinh"} /> : selectedLesson ? <LessonDetail lesson={roadmapQuery.data?.find((lesson) => lesson.id === selectedLesson || lesson.lessonId === selectedLesson)} studentCount={currentClass.student_count} /> : selectedReport ? <ReportDetail summary={selectedReportSummary} classId={classId} completedCount={selectedReportSummary?.completedStudents ?? selectedReportLesson?.completedCount ?? 0} studentCount={selectedReportSummary?.totalStudents ?? currentClass.student_count} /> : <DetailEmpty tab={tab} />}
       </aside>
 
       <AnimatePresence>{addStudentsOpen && <AddStudentsSheet classId={classId} onClose={() => setAddStudentsOpen(false)} />}</AnimatePresence>
@@ -149,7 +158,17 @@ function ReportList({ loading, error, reports, selected, onSelect }: { loading: 
   if (loading) return <ListSkeleton />;
   if (error) return <ListError error={error} />;
   if (!reports.length) return <ListEmpty icon={<ClipboardText size={26} />} title="Chưa có báo cáo" body="Báo cáo xuất hiện sau deadline khi lớp đã có dữ liệu làm bài." />;
-  return <div className="entity-list report-list">{reports.map((report) => { const id = report.reportId || report.lessonId; return <button key={id} data-selected={selected === id} onClick={() => onSelect(id)}><span className="report-status" data-status={report.status}>{report.status === "REPORT_READY" ? <CheckCircle size={18} weight="fill" /> : report.status === "FAILED" ? <WarningCircle size={18} /> : <ClockCounterClockwise size={18} />}</span><span className="entity-main"><strong>{report.title}</strong><small>{report.subject} / {report.topic}</small></span><span className="entity-action">{report.status === "REPORT_READY" ? "Xem báo cáo" : statusLabel(report.status)}</span></button>; })}</div>;
+  return <div className="entity-list report-list">{reports.map((report) => { const id = reportSelectionId(report); return <button key={`${report.classId || report.classIds[0]}:${id}`} data-selected={selected !== null && reportSelectionIds(report).includes(selected)} onClick={() => onSelect(id)}><span className="report-status" data-status={report.status}>{report.status === "REPORT_READY" ? <CheckCircle size={18} weight="fill" /> : report.status === "FAILED" ? <WarningCircle size={18} /> : <ClockCounterClockwise size={18} />}</span><span className="entity-main"><strong>{report.title}</strong><small>{report.subject} / {report.topic}</small></span><span className="entity-action">{report.status === "REPORT_READY" ? "Xem báo cáo" : statusLabel(report.status)}</span></button>; })}</div>;
+}
+
+function reportSelectionId(report: CopilotReportSummary) {
+  return report.publicationId || report.reportId || report.lessonId;
+}
+
+function reportSelectionIds(report: CopilotReportSummary) {
+  return [report.publicationId, report.reportId, report.lessonId].filter(
+    (value): value is string => Boolean(value),
+  );
 }
 
 function StudentDetail({ classId, studentId, studentName }: { classId: string; studentId: string; studentName: string }) {
@@ -236,18 +255,34 @@ function extractMarkdownSection(value: string, heading: string) {
   return (nextHeading >= 0 ? afterHeading.slice(0, nextHeading) : afterHeading).trim();
 }
 
-function ReportDetail({ lessonId: reportId }: { lessonId: string }) {
-  const report = useQuery({ queryKey: ["teacher", "copilot", reportId, "report"], queryFn: () => teacherApi.report(reportId), refetchInterval: (query) => ["PENDING", "ANALYSING"].includes(query.state.data?.status || "") ? 8_000 : false });
+function ReportDetail({ summary, classId, completedCount, studentCount }: { summary?: CopilotReportSummary; classId: string; completedCount: number; studentCount: number }) {
+  const queryClient = useQueryClient();
+  const reportId = summary?.reportId || "";
+  const report = useQuery({ queryKey: ["teacher", "copilot", reportId, "report"], queryFn: () => teacherApi.report(reportId), enabled: Boolean(reportId) });
   const skillLabels = useQuery({ queryKey: ["curriculum", "skills", report.data?.subject, report.data?.topic, report.data?.concept], queryFn: () => teacherApi.curriculumSkills(report.data?.subject || "", report.data?.topic || "", report.data?.concept || ""), enabled: Boolean(report.data?.subject && report.data?.topic && report.data?.concept), staleTime: Infinity });
+  const runReport = useMutation({
+    mutationFn: async () => {
+      if (!summary?.publicationId) throw new Error("Báo cáo chưa gắn với publication.");
+      return teacherApi.runClassReport(summary.publicationId, classId);
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["teacher", "copilot", "reports"] });
+    },
+  });
+
+  if (!summary) return <div className="detail-content"><ListEmpty icon={<WarningCircle size={25} />} title="Không tìm thấy bài học" body="Danh sách báo cáo vừa thay đổi. Hãy chọn lại bài học." /></div>;
+  const cannotRun = completedCount === 0 || summary.status === "ANALYSING" || runReport.isPending || !summary.publicationId;
+  const runLabel = summary.status === "REPORT_READY" ? "Tạo phiên bản báo cáo mới" : summary.status === "FAILED" ? "Chạy lại báo cáo" : "Chạy báo cáo";
+  const runAction = <div className="report-manual-run"><p>{completedCount}/{studentCount} học sinh đã hoàn thành.</p><button className="secondary-button" disabled={cannotRun} onClick={() => runReport.mutate()}><Sparkle size={16} weight="fill" />{runReport.isPending ? "Đang gửi yêu cầu" : summary.status === "ANALYSING" ? "Đang phân tích" : runLabel}</button>{completedCount === 0 ? <small>Cần ít nhất một học sinh hoàn thành trước khi chạy báo cáo.</small> : null}{runReport.isError ? <small className="student-form-error">{getApiErrorMessage(runReport.error, "Không thể chạy báo cáo.")}</small> : null}</div>;
+
+  if (summary.status !== "REPORT_READY") return <div className="detail-content"><p className="workspace-kicker">Báo cáo bài học</p><h2>{summary.title}</h2><div className="report-processing"><ClockCounterClockwise size={28} /><h3>{statusLabel(summary.status)}</h3><p>{summary.status === "ANALYSING" ? "Copilot đang tạo một immutable report version cho lớp này." : "Bạn có thể chạy báo cáo từ dữ liệu hiện có mà không cần chờ deadline."}</p></div>{runAction}</div>;
   if (report.isLoading) return <div className="detail-content"><ListSkeleton /></div>;
   if (report.isError) return <div className="detail-content"><ListError error={report.error} /></div>;
   const data = report.data;
-  if (!data) return null;
-  if (data.status !== "REPORT_READY") return <div className="detail-content"><p className="workspace-kicker">Báo cáo bài học</p><h2>{data.title}</h2><div className="report-processing"><ClockCounterClockwise size={28} /><h3>{statusLabel(data.status)}</h3><p>Copilot sẽ cập nhật trang này khi phân tích hoàn tất.</p></div></div>;
-  if (!data.report) return <div className="detail-content"><p className="workspace-kicker">Báo cáo bài học</p><h2>{data.title}</h2><ListEmpty icon={<WarningCircle size={25} />} title="Báo cáo chưa có nội dung" body="Trạng thái đã hoàn tất nhưng dữ liệu phân tích đang trống. Thử tải lại sau." /></div>;
+  if (!data?.report) return <div className="detail-content"><p className="workspace-kicker">Báo cáo bài học</p><h2>{summary.title}</h2><ListEmpty icon={<WarningCircle size={25} />} title="Báo cáo chưa có nội dung" body="Trạng thái đã hoàn tất nhưng dữ liệu phân tích đang trống. Thử tải lại sau." />{runAction}</div>;
   const skill = data.report;
   const labels = skillLabelMap(skillLabels.data);
-  return <div className="detail-content report-detail"><p className="workspace-kicker">Báo cáo bài học</p><h2>{data.title}</h2><p className="detail-lead">Phân tích từ {data.totalStudents} học sinh, thang điểm {skill.score_scale}.</p><SkillPerformanceTable metrics={skill.skill_metrics} labels={labels} /><section className="detail-section"><h3>Kỹ năng lớp làm tốt</h3><SkillChips items={skill.strengths} labels={labels} empty="Chưa có kỹ năng nổi bật." /></section><section className="detail-section"><h3>Cần củng cố</h3><SkillChips items={skill.top_weak_skill_ids.length ? skill.top_weak_skill_ids : skill.gaps} labels={labels} empty="Không có khoảng trống kỹ năng đáng kể." warning /></section>{skill.not_assessed_skill_ids?.length ? <section className="detail-section"><h3>Chưa được đánh giá</h3><SkillChips items={skill.not_assessed_skill_ids} labels={labels} empty="" /></section> : null}<GroupList title="Cần phụ đạo" ids={skill.remedial_student_ids} names={skill.student_names} /><GroupList title="Đang theo kịp" ids={skill.on_track_student_ids || []} names={skill.student_names} /><GroupList title="Có thể nâng cao" ids={skill.advanced_student_ids} names={skill.student_names} /><GroupList title="Chưa hoàn thành" ids={skill.not_finished_student_ids} names={skill.student_names} />{skill.not_assessed_student_ids?.length ? <GroupList title="Đã hoàn thành nhưng chưa có evidence" ids={skill.not_assessed_student_ids} names={skill.student_names} /> : null}<section className="report-actions"><Link className="primary-button" href={`/teacher/copilot/${reportId}/extra`}><Sparkle size={16} weight="fill" /> Tạo bài follow-up</Link><Link className="secondary-button" href={`/teacher/lessons/new?fromReport=${reportId}`}>Tạo bài tiếp theo</Link></section></div>;
+  return <div className="detail-content report-detail"><p className="workspace-kicker">Báo cáo bài học</p><h2>{data.title}</h2><p className="detail-lead">Phiên bản {data.reportVersion || 1}, phân tích từ {data.totalStudents} học sinh, thang điểm {skill.score_scale}.</p><SkillPerformanceTable metrics={skill.skill_metrics} labels={labels} /><section className="detail-section"><h3>Kỹ năng lớp làm tốt</h3><SkillChips items={skill.strengths} labels={labels} empty="Chưa có kỹ năng nổi bật." /></section><section className="detail-section"><h3>Cần củng cố</h3><SkillChips items={skill.top_weak_skill_ids.length ? skill.top_weak_skill_ids : skill.gaps} labels={labels} empty="Không có khoảng trống kỹ năng đáng kể." warning /></section>{skill.not_assessed_skill_ids?.length ? <section className="detail-section"><h3>Chưa được đánh giá</h3><SkillChips items={skill.not_assessed_skill_ids} labels={labels} empty="" /></section> : null}<GroupList title="Cần phụ đạo" ids={skill.remedial_student_ids} names={skill.student_names} /><GroupList title="Đang theo kịp" ids={skill.on_track_student_ids || []} names={skill.student_names} /><GroupList title="Có thể nâng cao" ids={skill.advanced_student_ids} names={skill.student_names} /><GroupList title="Chưa hoàn thành" ids={skill.not_finished_student_ids} names={skill.student_names} />{skill.not_assessed_student_ids?.length ? <GroupList title="Đã hoàn thành nhưng chưa có evidence" ids={skill.not_assessed_student_ids} names={skill.student_names} /> : null}{runAction}<section className="report-actions"><Link className="primary-button" href={`/teacher/copilot/${reportId}/extra`}><Sparkle size={16} weight="fill" /> Tạo bài follow-up</Link><Link className="secondary-button" href={`/teacher/lessons/new?fromReport=${reportId}`}>Tạo bài tiếp theo</Link></section></div>;
 }
 
 type SkillMetric = NonNullable<NonNullable<CopilotReportDetail["report"]>["skill_metrics"]>[string];

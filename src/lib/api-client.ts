@@ -239,6 +239,18 @@ export const teacherApi = {
         `/teacher/copilot/reports/${reportId}`,
       )
     ).data,
+  runClassReport: async (publicationId: string, classId: string) =>
+    (
+      await apiClient.post<{
+        status: "ANALYSING";
+        publicationId: string;
+        classId: string;
+        completedStudents: number;
+        totalStudents: number;
+      }>(
+        `/teacher/copilot/reports/${publicationId}/classes/${classId}/run`,
+      )
+    ).data,
   conversations: async () =>
     (
       await apiClient.get<{ conversations: ConversationSummary[] }>(

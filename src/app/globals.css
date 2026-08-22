@@ -6522,6 +6522,30 @@ button:disabled {
   padding-top: 1rem;
 }
 
+.report-manual-run {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  background: var(--surface-muted);
+  padding: 0.75rem;
+}
+
+.report-manual-run p {
+  margin-right: auto;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.report-manual-run small {
+  flex-basis: 100%;
+  color: var(--subtle);
+  font-size: 0.65rem;
+}
+
 .import-result {
   display: grid;
   gap: 0.5rem;
