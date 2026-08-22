@@ -230,8 +230,8 @@ function FollowUpCard({ lessonId, title, className, exerciseCount, index }: { le
     >
       <div className="lesson-card-meta"><span>{className}</span><span className="deadline"><Lightning size={15} weight="fill" /> Bài theo feedback</span></div>
       <div className="lesson-card-copy"><h3>Luyện thêm: {title}</h3><p>Giáo viên đã gửi một chặng luyện tập dựa trên kết quả bài vừa rồi.</p></div>
-      <div className="lesson-card-progress"><Compass size={18} /><div><strong>{exerciseCount} bài được chọn cho bạn</strong><span>Bắt đầu ngay với Study Buddy, không cần học lại Session 1.</span></div></div>
-      <Link className="student-primary-button" href={`/student/lesson/extra_${lessonId}/part2`}>Bắt đầu luyện thêm <ArrowRight size={17} /></Link>
+      <div className="lesson-card-progress"><Compass size={18} /><div><strong>{exerciseCount} bài được chọn cho bạn</strong><span>Bắt đầu từ Session 1 để ôn đúng phần giáo viên vừa giao.</span></div></div>
+      <Link className="student-primary-button" href={`/student/lesson/extra_${lessonId}/part1`}>Bắt đầu luyện thêm <ArrowRight size={17} /></Link>
     </motion.article>
   );
 }

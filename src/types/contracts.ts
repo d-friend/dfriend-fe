@@ -486,6 +486,9 @@ export interface StudySession {
   current_problem_id?: number | null;
   current_progress?: number;
   current_process?: number;
+  session_completed?: boolean;
+  completed_problem_count?: number;
+  total_problem_count?: number;
   subject?: string;
   topic?: string;
   concept?: string;

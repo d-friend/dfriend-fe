@@ -12,5 +12,5 @@ export default async function LegacyExtraLessonPage({
     ? `?class=${encodeURIComponent(query.class)}`
     : "";
 
-  redirect(`/student/lesson/extra_${encodeURIComponent(id)}/part2${classQuery}`);
+  redirect(`/student/lesson/extra_${encodeURIComponent(id)}/part1${classQuery}`);
 }

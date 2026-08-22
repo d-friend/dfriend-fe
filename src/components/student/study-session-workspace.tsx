@@ -123,7 +123,15 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
       setUiState("degraded");
       return;
     }
-    setSession((current) => current ? { ...current, current_progress: event.current_progress ?? current.current_progress, current_process: event.current_process ?? event.current_progress ?? current.current_process, current_problem_id: event.current_problem_id ?? current.current_problem_id } : current);
+    setSession((current) => current ? {
+      ...current,
+      current_progress: event.current_progress ?? current.current_progress,
+      current_process: event.current_process ?? event.current_progress ?? current.current_process,
+      current_problem_id: event.current_problem_id ?? current.current_problem_id,
+      session_completed: event.session_completed ?? current.session_completed,
+      completed_problem_count: event.completed_problem_count ?? current.completed_problem_count,
+      total_problem_count: event.total_problem_count ?? current.total_problem_count,
+    } : current);
     if (event.current_problem_id) setActiveProblemId(event.current_problem_id);
     if (event.awaiting_reasoning) setUiState("awaiting_reasoning");
     else if (event.spam) setUiState("farming");

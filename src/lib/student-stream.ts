@@ -13,6 +13,9 @@ export type StudyStreamEvent =
       spam?: boolean;
       is_correct?: boolean | null;
       state_updated?: boolean;
+      session_completed?: boolean;
+      completed_problem_count?: number;
+      total_problem_count?: number;
     }
   | { type: "error"; message?: string };
 
