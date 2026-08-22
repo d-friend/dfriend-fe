@@ -75,7 +75,7 @@ export function TeacherShell({ children }: { children: ReactNode }) {
   const recoveredNotifications = useMemo(
     () => (reportsQuery.data || [])
       .filter((report) => report.status === "REPORT_READY" && !report.acknowledgedAt)
-      .filter((report) => !openedReportIds.includes(report.lessonId))
+      .filter((report) => !openedReportIds.includes(report.reportId || report.lessonId))
       .map(reportNotification),
     [openedReportIds, reportsQuery.data],
   );
@@ -428,8 +428,8 @@ function reportNotification(report: CopilotReportSummary): TeacherNotification {
     title: "Báo cáo bài học đã sẵn sàng",
     message: `Báo cáo cho bài "${report.title}" đã sẵn sàng để xem.`,
     type: "COPILOT_REPORT_READY",
-    lessonId: report.lessonId,
-    path: classId ? `/teacher/classes/${classId}?tab=reports&report=${report.lessonId}` : "/teacher/classes?tab=reports",
+    lessonId: report.reportId || report.lessonId,
+    path: classId ? `/teacher/classes/${classId}?tab=reports&report=${report.reportId || report.lessonId}` : "/teacher/classes?tab=reports",
     createdAt: report.reportedAt || new Date().toISOString(),
   };
 }

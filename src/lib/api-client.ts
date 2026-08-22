@@ -79,6 +79,8 @@ export interface FollowUpSuggestion {
   target_skill_ids: string[];
   reason: string;
   empty_reason?: string | null;
+  originating_skill_ids?: string[];
+  prerequisite_routes?: Record<string, string>;
 }
 
 export interface FollowUpPlan {
@@ -88,6 +90,10 @@ export interface FollowUpPlan {
   main: FollowUpSuggestion;
   groups: FollowUpSuggestion[];
   generated_at: string;
+  planId?: string;
+  reportId?: string;
+  reportVersion?: number;
+  reportHash?: string;
   studentNames?: Record<string, string>;
 }
 
@@ -100,6 +106,9 @@ export interface FollowUpDraftResult {
     exercises: Array<Record<string, unknown>>;
     summary: string;
     aiLessonId: string;
+    publicationId?: string;
+    classId?: string;
+    sourceReportId?: string;
   };
 }
 
@@ -224,10 +233,10 @@ export const teacherApi = {
     (await apiClient.get<CopilotReportSummary[]>("/teacher/copilot/reports")).data,
   dismissCopilotReport: async (lessonId: string) =>
     apiClient.post(`/teacher/copilot/${lessonId}/dismiss`),
-  report: async (lessonId: string) =>
+  report: async (reportId: string) =>
     (
       await apiClient.get<CopilotReportDetail>(
-        `/teacher/copilot/${lessonId}/report`,
+        `/teacher/copilot/reports/${reportId}`,
       )
     ).data,
   conversations: async () =>
@@ -425,11 +434,13 @@ export const teacherApi = {
         timeout: 360_000,
       })
     ).data,
-  followUpPlan: async (lessonId: string) =>
-    (await apiClient.get<FollowUpPlan>(`/teacher/copilot/${lessonId}/follow-up-plan`)).data,
+  followUpPlan: async (reportId: string) =>
+    (await apiClient.get<FollowUpPlan>(`/teacher/copilot/reports/${reportId}/follow-up-plan`)).data,
   createFollowUpDraft: async (
     lessonId: string,
     payload: {
+      reportId: string;
+      planId?: string;
       kind: "remedial" | "advanced";
       conceptKey: string;
       studentIds: string[];

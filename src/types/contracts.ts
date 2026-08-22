@@ -294,6 +294,10 @@ export interface CopilotChatResponse {
 }
 
 export interface CopilotReportSummary {
+  reportId?: string;
+  reportVersion?: number;
+  reportHash?: string;
+  publicationId?: string;
   lessonId: string;
   title: string;
   subject: string;
@@ -316,10 +320,12 @@ export interface CopilotReportDetail extends CopilotReportSummary {
     advanced_student_ids: string[];
     on_track_student_ids?: string[];
     not_finished_student_ids: string[];
+    not_assessed_student_ids?: string[];
     not_assessed_skill_ids?: string[];
     top_weak_skill_ids: string[];
     attention_reasons: Record<string, string[]>;
     student_skill_gaps?: Record<string, string[]>;
+    student_skill_gap_session_counts?: Record<string, Record<string, number>>;
     skill_metrics?: Record<string, {
       skill_id: string;
       assessed_student_count: number;
@@ -420,6 +426,8 @@ export interface StudentRoadmapItem {
   title: string;
   status: "completed" | "active" | "locked";
   extra_exercises?: Array<{
+    publication_id: string;
+    problem_count?: number;
     group_type: string;
     summary: string;
     exercises: Array<{ problem_id?: number; question?: string }>;

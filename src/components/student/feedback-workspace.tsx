@@ -47,7 +47,7 @@ export function FeedbackWorkspace({ lessonId }: { lessonId: string }) {
   const progressPercent = clamp(reportQuery.data?.sessionProgress || 0, 0, 100);
   const totalCount = followUp ? finishedCount : Math.max(finishedCount, 4);
   const assignedExtraCount = (extrasQuery.data?.extra_exercises || []).reduce(
-    (count, group) => count + group.exercises.length,
+    (count, group) => count + (group.problem_count || group.exercises.length),
     0,
   );
   const expectedCount = followUp
@@ -62,7 +62,8 @@ export function FeedbackWorkspace({ lessonId }: { lessonId: string }) {
   const scoreTone = average >= 8 ? "strong" : average >= 6 ? "steady" : "focus";
   const scoreCopy = scoreTone === "strong" ? "Nắm khá chắc" : scoreTone === "steady" ? "Đang lên nhịp" : "Cần củng cố";
   const lessonTitle = reportQuery.data?.lessonTitle || "Bài học vừa hoàn thành";
-  const hasExtra = !followUp && Boolean(extrasQuery.data?.extra_exercises?.some((group) => group.exercises.length));
+  const hasExtra = !followUp && Boolean(extrasQuery.data?.extra_exercises?.some((group) => (group.problem_count || group.exercises.length) > 0));
+  const nextFollowUpId = extrasQuery.data?.extra_exercises?.find((group) => (group.problem_count || group.exercises.length) > 0)?.publication_id;
   const nextStep = nextStepCopy(gaps, developing);
 
   if (reportQuery.isLoading && !cachedSummary) return <div className="feedback-shell"><div className="student-skeleton feedback-skeleton" /></div>;
@@ -112,7 +113,7 @@ export function FeedbackWorkspace({ lessonId }: { lessonId: string }) {
         {developing.length ? <section className="buddy-observation"><span><Lightbulb size={21} weight="fill" /></span><div><h2>Đang hình thành</h2><p>{developing.map((item) => skillLabel(item.skill_id)).join(", ")}</p></div></section> : null}
         <section className="buddy-observation"><span><Lightbulb size={21} weight="fill" /></span><div><h2>Việc nên làm tiếp theo</h2><p>{nextStep}</p></div></section>
 
-        <div className="feedback-actions"><Link className="student-primary-button" href="/student/dashboard"><House size={18} weight="fill" /> Về Hôm nay</Link>{hasExtra && <Link className="student-secondary-button" href={`/student/lesson/extra_${lessonId}/part2`}>Luyện thêm <ArrowRight size={17} /></Link>}</div>
+        <div className="feedback-actions"><Link className="student-primary-button" href="/student/dashboard"><House size={18} weight="fill" /> Về Hôm nay</Link>{hasExtra && nextFollowUpId && <Link className="student-secondary-button" href={`/student/lesson/${nextFollowUpId}/part1`}>Luyện thêm <ArrowRight size={17} /></Link>}</div>
       </div>
     </main>
   );

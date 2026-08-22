@@ -146,7 +146,6 @@ export function LessonAuthoring() {
   useEffect(() => {
     if (!reportPrefill.data || !reportId || appliedReportId.current === reportId) return;
     if (!followUpPrefill.data && followUpPrefill.isLoading) return;
-    appliedReportId.current = reportId;
     const data = reportPrefill.data;
     const mainPlan = followUpPrefill.data?.main;
     const plannedConcept = parseConceptKey(mainPlan?.concept_key || "");
@@ -154,22 +153,26 @@ export function LessonAuthoring() {
     const skillText = plannedSkills.length
       ? plannedSkills.map(readableSkill).join(", ")
       : "các kỹ năng quan trọng của bài tiếp theo";
-    setPhase("goal");
-    setDescription("");
-    setFile(null);
-    setDraftExerciseId("");
-    setPrecheckData(null);
-    setError("");
-    setSubject(plannedConcept?.subject || data.subject || "");
-    setTopic(plannedConcept?.topic || data.topic || "");
-    setConcept(plannedConcept?.concept || data.concept || "");
-    setClassIds(data.classIds || []);
-    setSelectedSkills(plannedSkills);
-    setTitle(`Bài tiếp theo: ${data.title || "báo cáo gần nhất"}`);
-    setLessonGoal(
-      `Sau bài này, học sinh làm được ${skillText}. ` +
-        `Ưu tiên sửa đúng các lỗi được phát hiện sau bài “${data.title || "gần nhất"}”.`,
-    );
+    const timer = window.setTimeout(() => {
+      appliedReportId.current = reportId;
+      setPhase("goal");
+      setDescription("");
+      setFile(null);
+      setDraftExerciseId("");
+      setPrecheckData(null);
+      setError("");
+      setSubject(plannedConcept?.subject || data.subject || "");
+      setTopic(plannedConcept?.topic || data.topic || "");
+      setConcept(plannedConcept?.concept || data.concept || "");
+      setClassIds(data.classIds || []);
+      setSelectedSkills(plannedSkills);
+      setTitle(`Bài tiếp theo: ${data.title || "báo cáo gần nhất"}`);
+      setLessonGoal(
+        `Sau bài này, học sinh làm được ${skillText}. ` +
+          `Ưu tiên sửa đúng các lỗi được phát hiện sau bài “${data.title || "gần nhất"}”.`,
+      );
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [reportId, reportPrefill.data, followUpPrefill.data, followUpPrefill.isLoading]);
 
   useEffect(() => {

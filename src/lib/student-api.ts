@@ -89,6 +89,8 @@ export const studentApi = {
       await apiClient.get<{
         lesson_id: string;
         extra_exercises: Array<{
+          publication_id: string;
+          problem_count?: number;
           group_type: string;
           summary: string;
           exercises: Array<{ problem_id?: number; question?: string }>;

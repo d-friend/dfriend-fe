@@ -7,30 +7,26 @@ import { useEffect, useMemo, useState } from "react";
 import { getApiErrorMessage, teacherApi, type FollowUpPlan, type FollowUpSuggestion } from "@/lib/api-client";
 
 type LaneKind = "remedial" | "advanced";
-type LaneState = Record<LaneKind, { skillIds: string[]; lessonGoal: string }>;
-
-const emptyLaneState: LaneState = {
-  remedial: { skillIds: [], lessonGoal: "" },
-  advanced: { skillIds: [], lessonGoal: "" },
-};
+type LaneState = Record<string, { skillIds: string[]; lessonGoal: string }>;
 
 export function FollowUpWorkspace({ lessonId }: { lessonId: string }) {
   const router = useRouter();
   const plan = useQuery({ queryKey: ["teacher", "copilot", lessonId, "follow-up-plan"], queryFn: () => teacherApi.followUpPlan(lessonId) });
-  const [laneState, setLaneState] = useState<LaneState>(emptyLaneState);
+  const [laneState, setLaneState] = useState<LaneState>({});
   const [appliedPlanAt, setAppliedPlanAt] = useState("");
   const createDraft = useMutation({
-    mutationFn: async (kind: LaneKind) => {
-      const lane = laneFromPlan(plan.data, kind);
-      if (!lane) throw new Error("Không tìm thấy nhóm follow-up.");
-      const selected = laneState[kind].skillIds;
+    mutationFn: async ({ lane, laneKey }: { lane: FollowUpSuggestion; laneKey: string }) => {
+      if (!plan.data?.reportId) throw new Error("Kế hoạch chưa gắn với report snapshot.");
+      const selected = laneState[laneKey]?.skillIds || [];
       const original = lane.target_skill_ids || [];
-      const result = await teacherApi.createFollowUpDraft(lessonId, {
-        kind,
+      const result = await teacherApi.createFollowUpDraft(plan.data.lesson_id, {
+        reportId: plan.data.reportId,
+        planId: plan.data.planId,
+        kind: lane.kind as LaneKind,
         conceptKey: lane.concept_key,
         studentIds: lane.target_student_ids || [],
         skillIds: selected,
-        lessonGoal: laneState[kind].lessonGoal,
+        lessonGoal: laneState[laneKey]?.lessonGoal || "",
         editedRecommendation: !sameSet(selected, original),
       });
       return result;
@@ -42,23 +38,20 @@ export function FollowUpWorkspace({ lessonId }: { lessonId: string }) {
 
   useEffect(() => {
     if (!plan.data || appliedPlanAt === plan.data.generated_at) return;
-    setLaneState({
-      remedial: {
-        skillIds: laneFromPlan(plan.data, "remedial")?.target_skill_ids?.slice(0, 2) || [],
-        lessonGoal: "",
-      },
-      advanced: {
-        skillIds: laneFromPlan(plan.data, "advanced")?.target_skill_ids?.slice(0, 2) || [],
-        lessonGoal: "",
-      },
-    });
-    setAppliedPlanAt(plan.data.generated_at);
+    const timer = window.setTimeout(() => {
+      setLaneState(Object.fromEntries((plan.data?.groups || []).map((lane, index) => [
+        `${lane.kind}-${index}`,
+        { skillIds: lane.target_skill_ids?.slice(0, 2) || [], lessonGoal: "" },
+      ])));
+      setAppliedPlanAt(plan.data?.generated_at || "");
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [appliedPlanAt, plan.data]);
 
-  const hasActionableLane = ["remedial", "advanced"].some((kind) => {
-    const lane = laneFromPlan(plan.data, kind as LaneKind);
-    return lane && (lane.target_student_ids || []).length > 0 && !lane.empty_reason;
-  });
+  const actionableLanes = (plan.data?.groups || []).filter(
+    (lane) => (lane.target_student_ids || []).length > 0 && !lane.empty_reason,
+  );
+  const hasActionableLane = actionableLanes.length > 0;
 
   return (
     <section className="follow-up-page">
@@ -88,22 +81,19 @@ export function FollowUpWorkspace({ lessonId }: { lessonId: string }) {
 
       {plan.data && hasActionableLane && (
         <div className="follow-up-planner-grid">
-          <FollowUpLane
-            kind="remedial"
-            plan={plan.data}
-            state={laneState.remedial}
-            pending={createDraft.isPending}
-            onStateChange={(next) => setLaneState((current) => ({ ...current, remedial: next }))}
-            onConfirm={() => createDraft.mutate("remedial")}
-          />
-          <FollowUpLane
-            kind="advanced"
-            plan={plan.data}
-            state={laneState.advanced}
-            pending={createDraft.isPending}
-            onStateChange={(next) => setLaneState((current) => ({ ...current, advanced: next }))}
-            onConfirm={() => createDraft.mutate("advanced")}
-          />
+          {actionableLanes.map((lane) => {
+            const laneKey = `${lane.kind}-${(plan.data?.groups || []).indexOf(lane)}`;
+            return <FollowUpLane
+              key={laneKey}
+              lane={lane}
+              laneKey={laneKey}
+              plan={plan.data}
+              state={laneState[laneKey] || { skillIds: [], lessonGoal: "" }}
+              pending={createDraft.isPending}
+              onStateChange={(next) => setLaneState((current) => ({ ...current, [laneKey]: next }))}
+              onConfirm={() => createDraft.mutate({ lane, laneKey })}
+            />;
+          })}
         </div>
       )}
     </section>
@@ -111,21 +101,23 @@ export function FollowUpWorkspace({ lessonId }: { lessonId: string }) {
 }
 
 function FollowUpLane({
-  kind,
+  lane,
+  laneKey,
   plan,
   state,
   pending,
   onStateChange,
   onConfirm,
 }: {
-  kind: LaneKind;
+  lane: FollowUpSuggestion;
+  laneKey: string;
   plan: FollowUpPlan;
   state: { skillIds: string[]; lessonGoal: string };
   pending: boolean;
   onStateChange: (state: { skillIds: string[]; lessonGoal: string }) => void;
   onConfirm: () => void;
 }) {
-  const lane = laneFromPlan(plan, kind);
+  const kind = lane.kind as LaneKind;
   const parsed = parseConceptKey(lane?.concept_key || "");
   const skills = useQuery({
     queryKey: ["curriculum", "skills", parsed?.subject, parsed?.topic, parsed?.concept],
@@ -202,11 +194,11 @@ function FollowUpLane({
           </div>
           <div className="follow-up-goal-field">
             <div>
-              <label htmlFor={`goal-${kind}`}>Mục tiêu riêng</label>
+              <label htmlFor={`goal-${laneKey}`}>Mục tiêu riêng</label>
               <small>{selectedLabels.length ? selectedLabels.join(", ") : "Kỹ năng đã chọn sẽ là nguồn chính."}</small>
             </div>
             <textarea
-              id={`goal-${kind}`}
+              id={`goal-${laneKey}`}
               className="textarea"
               value={state.lessonGoal}
               onChange={(event) => onStateChange({ ...state, lessonGoal: event.target.value })}
@@ -220,10 +212,6 @@ function FollowUpLane({
       )}
     </article>
   );
-}
-
-function laneFromPlan(plan: FollowUpPlan | undefined, kind: LaneKind): FollowUpSuggestion | undefined {
-  return plan?.groups?.find((item) => item.kind === kind);
 }
 
 function parseConceptKey(value: string) {
