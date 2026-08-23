@@ -1,4 +1,4 @@
-import { teacherApi } from "@/lib/api-client";
+import { isApiErrorStatus, teacherApi } from "@/lib/api-client";
 
 export type LessonGenerationResult = Record<string, unknown> & {
   lessonId?: string;
@@ -18,8 +18,19 @@ export async function waitForLessonGeneration(
   onStage: (stage: string) => void,
 ): Promise<LessonGenerationResult> {
   const timeoutAt = Date.now() + 10 * 60_000;
+  const registrationGraceAt = Date.now() + 30_000;
   while (Date.now() < timeoutAt) {
-    const job = await teacherApi.lessonGenerationJob(jobId);
+    let job: Record<string, unknown>;
+    try {
+      job = await teacherApi.lessonGenerationJob(jobId);
+    } catch (error) {
+      if (isApiErrorStatus(error, 404) && Date.now() < registrationGraceAt) {
+        onStage("Đang đưa yêu cầu vào hàng đợi");
+        await new Promise((resolve) => window.setTimeout(resolve, 500));
+        continue;
+      }
+      throw error;
+    }
     const progress = isRecord(job.progress) ? String(job.progress.stage || "") : "";
     if (progress === "precheck") onStage("Đang kiểm tra kỹ năng và nguồn bài phù hợp");
     if (progress === "knowledge") onStage("Đang soạn Session 1 theo kỹ năng và mục tiêu");

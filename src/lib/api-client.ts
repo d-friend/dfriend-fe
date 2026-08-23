@@ -287,7 +287,7 @@ export const teacherApi = {
       })
     ).data,
   confirmCopilotPlan: async (
-    payload: { classId: string; goalText: string; conceptKey: string; skillIds: string[]; allowGenerated?: boolean },
+    payload: { classId: string; goalText: string; conceptKey: string; skillIds: string[]; allowGenerated?: boolean; requestId?: string },
   ) =>
     (
       await apiClient.post<{ jobId: string; generationRunId: string; status: "queued" }>(
@@ -470,13 +470,14 @@ export const teacherApi = {
     lessonId: string,
     payload: {
       reportId: string;
-      planId?: string;
+      planId: string;
       kind: "remedial" | "advanced";
       conceptKey: string;
       studentIds: string[];
       skillIds: string[];
       lessonGoal?: string;
       editedRecommendation?: boolean;
+      requestId?: string;
     },
   ) =>
     (

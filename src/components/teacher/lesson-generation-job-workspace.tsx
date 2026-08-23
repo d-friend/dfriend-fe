@@ -18,8 +18,13 @@ export function LessonGenerationJobWorkspace({ jobId }: { jobId: string }) {
   const [error, setError] = useState("");
   const [activeJobId, setActiveJobId] = useState(jobId);
   const [retryNonce, setRetryNonce] = useState(0);
+  const enqueueError = search.get("enqueueError") || "";
+  const visibleError = enqueueError || error;
 
   useEffect(() => {
+    if (enqueueError) {
+      return;
+    }
     let cancelled = false;
     void waitForLessonGeneration(activeJobId, setDetail)
       .then((result) => {
@@ -40,7 +45,7 @@ export function LessonGenerationJobWorkspace({ jobId }: { jobId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [activeJobId, retryNonce, router]);
+  }, [activeJobId, enqueueError, retryNonce, router]);
 
   async function retryMissing() {
     setError("");
@@ -65,7 +70,8 @@ export function LessonGenerationJobWorkspace({ jobId }: { jobId: string }) {
           <p className="workspace-kicker">Bản nháp đã được giữ</p>
           <h1>Còn slot chưa đạt chuẩn</h1>
           <p className="lesson-generation-lead">
-            Đã hoàn thành {partial.generationCompletedSlots || 0}/{partial.generationTotalSlots || 12} slot. Retry dùng lại đúng generation run này.
+            Đã hoàn thành {partial.generationCompletedSlots || 0}
+            {typeof partial.generationTotalSlots === "number" ? `/${partial.generationTotalSlots}` : ""} slot. Retry dùng lại đúng generation run này.
           </p>
           <button className="primary-button" onClick={retryMissing}>Tạo tiếp phần còn thiếu</button>
         </div>
@@ -73,14 +79,16 @@ export function LessonGenerationJobWorkspace({ jobId }: { jobId: string }) {
     );
   }
 
-  if (error) {
+  if (visibleError) {
     return (
       <section className="lesson-generation-screen">
         <div className="lesson-generation-panel">
           <WarningCircle size={34} />
           <h1>Tiến trình tạo bài gặp lỗi</h1>
-          <p className="lesson-generation-lead">{error}</p>
-          <button className="secondary-button" onClick={() => setRetryNonce((value) => value + 1)}>Kiểm tra lại</button>
+          <p className="lesson-generation-lead">{visibleError}</p>
+          <button className="secondary-button" onClick={() => enqueueError ? router.back() : setRetryNonce((value) => value + 1)}>
+            {enqueueError ? "Quay lại planning" : "Kiểm tra lại"}
+          </button>
         </div>
       </section>
     );

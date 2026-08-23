@@ -335,12 +335,14 @@ function LessonPlanCard({ plan, classId }: { plan: CopilotLessonPlan; classId: s
   const [consentDetail, setConsentDetail] = useState(startsWithoutMaterial ? plan.detail : "");
   const confirm = useMutation({
     mutationFn: async (allowGenerated: boolean) => {
+      const requestId = crypto.randomUUID();
       const queued = await teacherApi.confirmCopilotPlan({
         classId,
         goalText: plan.goalText,
         conceptKey: plan.conceptKey,
         skillIds: Array.from(selected),
         allowGenerated,
+        requestId,
       });
       setActiveJobId(queued.jobId);
       return queued;

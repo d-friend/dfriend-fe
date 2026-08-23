@@ -5790,16 +5790,16 @@ button:disabled {
   position: relative;
   display: grid;
   min-height: calc(100dvh - var(--topbar-height));
-  grid-template-columns: minmax(32rem, 1fr) var(--detail-width, 430px);
+  grid-template-columns: minmax(20rem, 1fr) var(--detail-width, 560px);
 }
 
 .class-detail-resizer {
   position: absolute;
   z-index: 4;
   top: 0;
-  right: calc(var(--detail-width, 430px) - 5px);
+  right: calc(var(--detail-width, 560px) - 7px);
   bottom: 0;
-  width: 10px;
+  width: 14px;
   border: 0;
   background: transparent;
   cursor: col-resize;
@@ -5811,9 +5811,9 @@ button:disabled {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: 4px;
+  left: 6px;
   width: 2px;
-  background: transparent;
+  background: color-mix(in srgb, var(--line) 78%, transparent);
   transition: background 140ms ease;
 }
 
@@ -6158,6 +6158,56 @@ button:disabled {
   left: 1.15rem;
   width: 1px;
   background: var(--line-strong);
+}
+
+.report-lane-family {
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface-muted) 58%, transparent);
+}
+
+.report-lane-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.55rem 0.8rem 0.45rem 2.35rem;
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.report-lane-heading strong {
+  color: var(--ink);
+}
+
+.report-lane-family > button {
+  display: grid;
+  position: relative;
+  width: 100%;
+  min-height: 4rem;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.7rem;
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+  padding: 0.65rem 0.8rem 0.65rem 2.35rem;
+  text-align: left;
+}
+
+.report-lane-family > button::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 1.15rem;
+  width: 1px;
+  background: var(--line-strong);
+}
+
+.report-lane-family > button:hover,
+.report-lane-family > button[data-selected="true"] {
+  background: var(--brand-soft);
 }
 
 .report-status {
@@ -6691,7 +6741,7 @@ button:disabled {
 
 @media (max-width: 1180px) {
   .class-workspace {
-    grid-template-columns: minmax(31rem, 1fr) var(--detail-width, 390px);
+    grid-template-columns: minmax(20rem, 1fr) var(--detail-width, 560px);
   }
   .class-facts {
     grid-template-columns: 1fr 0.7fr;

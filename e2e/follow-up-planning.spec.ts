@@ -35,6 +35,7 @@ test.afterAll(async () => {
 
 test("follow-up lanes create independently, open new tabs, and restore created state", async ({ browser }) => {
   const state = { remedialCreated: false };
+  let submittedRequestId = "";
   const context = await teacherContext(browser, async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -42,7 +43,8 @@ test("follow-up lanes create independently, open new tabs, and restore created s
       return json(route, planPayload(state.remedialCreated));
     }
     if (url.pathname.endsWith("/follow-up-drafts") && request.method() === "POST") {
-      const body = request.postDataJSON() as { kind: "remedial" | "advanced" };
+      const body = request.postDataJSON() as { kind: "remedial" | "advanced"; requestId: string };
+      submittedRequestId = body.requestId;
       await delay(250);
       state.remedialCreated ||= body.kind === "remedial";
       return json(route, draftPayload(body.kind));
@@ -58,6 +60,9 @@ test("follow-up lanes create independently, open new tabs, and restore created s
   const popupPromise = context.waitForEvent("page");
   await page.getByRole("button", { name: "Tạo bài phụ đạo" }).click();
   const popup = await popupPromise;
+  await expect(popup).toHaveURL(/\/teacher\/lessons\/generating\/[0-9a-f-]+\?kind=remedial&origin=copilot$/);
+  const openedRequestId = new URL(popup.url()).pathname.split("/").at(-1);
+  await expect.poll(() => submittedRequestId).toBe(openedRequestId);
   await expect(page.getByRole("button", { name: "Tạo bài nâng cao" })).toBeEnabled();
   await expect(page.getByRole("button", { name: "Đang tạo bản nháp" })).toBeDisabled();
   await popup.waitForURL(/\/teacher\/lessons\/ai-remedial-1\/review$/);
@@ -94,6 +99,78 @@ test("create both preserves remedial success when advanced creation fails", asyn
   await expect(page.getByRole("button", { name: "Tạo bài nâng cao" })).toBeEnabled();
   await expect(page.getByText("advanced generation failed")).toBeVisible();
   await expect.poll(() => opened.some((popup) => /ai-remedial-1\/review$/.test(popup.url()))).toBe(true);
+  await context.close();
+});
+
+test("loading route survives pre-registration 404 and reloads into the same job", async ({ browser }) => {
+  let requestId = "";
+  let jobReads = 0;
+  const context = await teacherContext(browser, async (route) => {
+    const request = route.request();
+    const pathname = new URL(request.url()).pathname;
+    if (pathname.endsWith("/follow-up-plan")) return json(route, planPayload(false));
+    if (pathname.endsWith("/follow-up-drafts") && request.method() === "POST") {
+      requestId = (request.postDataJSON() as { requestId: string }).requestId;
+      return json(route, { created: false, queued: true, jobId: requestId, requestId, kind: "remedial" });
+    }
+    if (requestId && pathname.endsWith(`/exercises/create-lesson/jobs/${requestId}`)) {
+      jobReads += 1;
+      if (jobReads <= 2) return json(route, { message: "not registered" }, 404);
+      if (jobReads === 3) return json(route, { status: "generating", progress: { stage: "knowledge" }, result: null });
+      return json(route, { status: "ready", progress: { stage: "ready" }, result: { lessonId: "ai-remedial-ready", generationStatus: "complete" } });
+    }
+    return shellApi(route);
+  });
+  const page = await context.newPage();
+  await page.goto(`${frontendUrl}/teacher/copilot/report-1/extra`);
+
+  const popupPromise = context.waitForEvent("page");
+  await page.getByRole("button", { name: "Tạo bài phụ đạo" }).click();
+  const popup = await popupPromise;
+  await expect(popup).toHaveURL(/\/teacher\/lessons\/generating\/[0-9a-f-]+/);
+  await popup.reload();
+  await popup.waitForURL(/\/teacher\/lessons\/ai-remedial-ready\/review$/);
+  expect(jobReads).toBeGreaterThanOrEqual(4);
+  await context.close();
+});
+
+test("report tree keeps immutable source nesting and the detail panel restores keyboard width", async ({ browser }) => {
+  const reports = reportSummaries();
+  const context = await teacherContext(browser, async (route) => {
+    const pathname = new URL(route.request().url()).pathname;
+    if (pathname.endsWith("/teacher/classes")) {
+      return json(route, {
+        classes: [{ class_id: "class-1", class_name: "Lớp 8", description: "", class_code: "LOP8", student_count: 2 }],
+      });
+    }
+    if (pathname.endsWith("/teacher/classes/class-1/students")) return json(route, { students: [] });
+    if (pathname.endsWith("/teacher/classes/class-1/roadmap")) return json(route, []);
+    if (pathname.endsWith("/teacher/copilot/reports/report-remedial-v2")) {
+      return json(route, followUpReportDetail(reports.find((report) => report.reportId === "report-remedial-v2")));
+    }
+    if (pathname.endsWith("/teacher/copilot/reports")) return json(route, reports);
+    if (pathname.endsWith("/exercises/curriculum/skills")) return json(route, { skills: [] });
+    return shellApi(route);
+  });
+  const page = await context.newPage();
+  await page.goto(`${frontendUrl}/teacher/classes/class-1?tab=reports`);
+
+  await expect(page.getByText("Báo cáo lớp · v2")).toBeVisible();
+  await expect(page.getByText("Báo cáo lớp · v1")).toBeVisible();
+  await expect(page.getByLabel("Phụ đạo từ report v1")).toContainText("Kết quả phụ đạo · v2 · từ report v1");
+  await expect(page.getByLabel("Nâng cao từ report v1")).toContainText("Kết quả nâng cao · v1 · từ report v1");
+
+  await page.getByRole("button", { name: /Kết quả phụ đạo · v2/ }).click();
+  await expect(page.getByRole("link", { name: "Tạo bài tiếp theo" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Tạo bài follow-up" })).toHaveCount(0);
+
+  const separator = page.getByRole("separator", { name: "Đổi độ rộng panel chi tiết" });
+  await expect(separator).toHaveAttribute("aria-valuenow", "560");
+  await separator.focus();
+  await separator.press("ArrowLeft");
+  await expect(separator).toHaveAttribute("aria-valuenow", "592");
+  await page.reload();
+  await expect(page.getByRole("separator", { name: "Đổi độ rộng panel chi tiết" })).toHaveAttribute("aria-valuenow", "592");
   await context.close();
 });
 
@@ -155,6 +232,44 @@ function draftPayload(kind: "remedial" | "advanced") {
       exercises: [],
       summary: kind,
       aiLessonId: `ai-${kind}-1`,
+    },
+  };
+}
+
+function reportSummaries() {
+  const common = {
+    lessonId: "lesson-main-1",
+    title: "Đơn thức",
+    subject: "math8",
+    topic: "polynomials",
+    classNames: "Lớp 8",
+    classIds: ["class-1"],
+    classId: "class-1",
+    completedStudents: 2,
+    totalStudents: 2,
+    status: "REPORT_READY" as const,
+    reportedAt: "2026-08-23T00:00:00Z",
+    acknowledgedAt: null,
+    publishedAt: "2026-08-22T00:00:00Z",
+  };
+  return [
+    { ...common, reportId: "report-main-v2", reportVersion: 2, publicationId: "publication-main", lessonKind: "main" as const, reportKind: "main_outcome" as const },
+    { ...common, reportId: "report-main-v1", reportVersion: 1, publicationId: "publication-main", lessonKind: "main" as const, reportKind: "main_outcome" as const },
+    { ...common, reportId: "report-remedial-v2", reportVersion: 2, publicationId: "publication-remedial", lessonId: "lesson-remedial", lessonKind: "remedial" as const, reportKind: "follow_up_outcome" as const, sourceReportId: "report-main-v1", sourceReportVersion: 1, completedStudents: 1, totalStudents: 1 },
+    { ...common, reportId: "report-remedial-v1", reportVersion: 1, publicationId: "publication-remedial", lessonId: "lesson-remedial", lessonKind: "remedial" as const, reportKind: "follow_up_outcome" as const, sourceReportId: "report-main-v1", sourceReportVersion: 1, completedStudents: 1, totalStudents: 1 },
+    { ...common, reportId: "report-advanced-v1", reportVersion: 1, publicationId: "publication-advanced", lessonId: "lesson-advanced", lessonKind: "advanced" as const, reportKind: "follow_up_outcome" as const, sourceReportId: "report-main-v1", sourceReportVersion: 1, completedStudents: 1, totalStudents: 1 },
+  ];
+}
+
+function followUpReportDetail(summary: ReturnType<typeof reportSummaries>[number] | undefined) {
+  return {
+    ...summary,
+    concept: "monomials",
+    canPlanFollowUp: false,
+    canCreateNextMain: true,
+    report: {
+      strengths: [], gaps: [], remedial_student_ids: [], advanced_student_ids: [], not_finished_student_ids: [], top_weak_skill_ids: [], attention_reasons: {}, student_names: {}, score_scale: 10,
+      follow_up_student_outcomes: {}, follow_up_skill_deltas: {}, skill_metrics: {},
     },
   };
 }

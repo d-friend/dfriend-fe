@@ -266,6 +266,8 @@ export function LessonAuthoring() {
     try {
       setGenerationStep("Đang phân tích mục tiêu và tìm tài liệu phù hợp");
       const form1 = new FormData();
+      const requestId = crypto.randomUUID();
+      form1.append("requestId", requestId);
       form1.append("title", title.trim());
       form1.append("description", description.trim());
       form1.append("lessonGoal", lessonGoal.trim());

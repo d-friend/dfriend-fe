@@ -20,9 +20,11 @@ export function FollowUpWorkspace({ lessonId }: { lessonId: string }) {
   const [laneErrors, setLaneErrors] = useState<Record<string, string>>({});
   const [appliedPlanAt, setAppliedPlanAt] = useState("");
 
-  async function createLane(lane: FollowUpSuggestion, laneKey: string, reviewTab: Window) {
-    if (!plan.data?.reportId) {
-      reviewTab.close();
+  async function createLane(lane: FollowUpSuggestion, laneKey: string, requestId: string, reviewTab: Window) {
+    if (!plan.data?.reportId || !plan.data.planId) {
+      reviewTab.location.replace(
+        generationRoute(requestId, lane.kind as LaneKind, "Kế hoạch chưa gắn với report snapshot."),
+      );
       setLaneErrors((current) => ({ ...current, [laneKey]: "Kế hoạch chưa gắn với report snapshot." }));
       return;
     }
@@ -41,6 +43,7 @@ export function FollowUpWorkspace({ lessonId }: { lessonId: string }) {
         skillIds: selected,
         lessonGoal: laneState[laneKey]?.lessonGoal || "",
         editedRecommendation: !sameSet(selected, original),
+        requestId,
       });
       if (result.draft) {
         setCreatedByKind((current) => ({ ...current, [kind]: result.draft }));
@@ -52,35 +55,28 @@ export function FollowUpWorkspace({ lessonId }: { lessonId: string }) {
       }
       setQueuedByKind((current) => ({ ...current, [kind]: result.jobId }));
       reviewTab.location.replace(
-        `/teacher/lessons/generating/${encodeURIComponent(result.jobId)}?kind=${kind}&origin=copilot`,
+        generationRoute(result.jobId, kind),
       );
     } catch (error) {
-      reviewTab.close();
+      const message = getApiErrorMessage(error, `Chưa tạo được bản nháp ${kind === "remedial" ? "phụ đạo" : "nâng cao"}.`);
+      reviewTab.location.replace(generationRoute(requestId, kind, message));
       setLaneErrors((current) => ({
         ...current,
-        [laneKey]: getApiErrorMessage(error, `Chưa tạo được bản nháp ${kind === "remedial" ? "phụ đạo" : "nâng cao"}.`),
+        [laneKey]: message,
       }));
     } finally {
       setPendingLaneKeys((current) => current.filter((key) => key !== laneKey));
     }
   }
 
-  function reserveReviewTab() {
-    const tab = window.open("about:blank", "_blank");
-    if (tab) {
-      tab.document.title = "D-Friend · Đang tạo bản nháp";
-      tab.document.body.innerHTML = '<p style="font-family:system-ui;padding:32px">Đang tạo bản nháp follow-up…</p>';
-    }
-    return tab;
-  }
-
   function createOne(lane: FollowUpSuggestion, laneKey: string) {
-    const tab = reserveReviewTab();
+    const requestId = crypto.randomUUID();
+    const tab = window.open(generationRoute(requestId, lane.kind as LaneKind), "_blank");
     if (!tab) {
       setLaneErrors((current) => ({ ...current, [laneKey]: "Trình duyệt đang chặn tab mới. Hãy cho phép pop-up rồi thử lại." }));
       return;
     }
-    void createLane(lane, laneKey, tab);
+    void createLane(lane, laneKey, requestId, tab);
   }
 
   useEffect(() => {
@@ -111,15 +107,19 @@ export function FollowUpWorkspace({ lessonId }: { lessonId: string }) {
     const targets = lanesAvailableForBoth.map((lane) => ({
       lane,
       laneKey: `${lane.kind}-${(plan.data?.groups || []).indexOf(lane)}`,
-      tab: reserveReviewTab(),
+      requestId: crypto.randomUUID(),
     }));
-    if (targets.some((target) => !target.tab)) {
-      targets.forEach((target) => target.tab?.close());
+    const reserved = targets.map((target) => ({
+      ...target,
+      tab: window.open(generationRoute(target.requestId, target.lane.kind as LaneKind), "_blank"),
+    }));
+    if (reserved.some((target) => !target.tab)) {
+      reserved.forEach((target) => target.tab?.close());
       setLaneErrors((current) => ({ ...current, both: "Trình duyệt đang chặn tab mới. Hãy cho phép pop-up rồi thử lại." }));
       return;
     }
     setLaneErrors((current) => ({ ...current, both: "" }));
-    targets.forEach((target) => void createLane(target.lane, target.laneKey, target.tab as Window));
+    reserved.forEach((target) => void createLane(target.lane, target.laneKey, target.requestId, target.tab as Window));
   }
 
   return (
@@ -168,12 +168,13 @@ export function FollowUpWorkspace({ lessonId }: { lessonId: string }) {
               plan={plan.data}
               state={laneState[laneKey] || { skillIds: [], lessonGoal: "", goalEdited: false }}
               pending={pendingLaneKeys.includes(laneKey)}
-              queued={Boolean(queuedByKind[kind])}
+              queuedJobId={queuedByKind[kind]}
               createdDraft={createdByKind[kind]}
               error={laneErrors[laneKey]}
               onStateChange={(next) => setLaneState((current) => ({ ...current, [laneKey]: next }))}
               onConfirm={() => createOne(lane, laneKey)}
               onOpen={(draft) => window.open(`/teacher/lessons/${draft.aiLessonId}/review`, "_blank", "noopener,noreferrer")}
+              onOpenJob={(jobId) => window.open(generationRoute(jobId, kind), "_blank", "noopener,noreferrer")}
             />;
           })}
         </div>
@@ -183,30 +184,38 @@ export function FollowUpWorkspace({ lessonId }: { lessonId: string }) {
   );
 }
 
+function generationRoute(requestId: string, kind: LaneKind, enqueueError?: string) {
+  const params = new URLSearchParams({ kind, origin: "copilot" });
+  if (enqueueError) params.set("enqueueError", enqueueError);
+  return `/teacher/lessons/generating/${encodeURIComponent(requestId)}?${params.toString()}`;
+}
+
 function FollowUpLane({
   lane,
   laneKey,
   plan,
   state,
   pending,
-  queued,
+  queuedJobId,
   createdDraft,
   error,
   onStateChange,
   onConfirm,
   onOpen,
+  onOpenJob,
 }: {
   lane: FollowUpSuggestion;
   laneKey: string;
   plan: FollowUpPlan;
   state: LaneFormState;
   pending: boolean;
-  queued: boolean;
+  queuedJobId?: string;
   createdDraft?: FollowUpDraftHandle;
   error?: string;
   onStateChange: (state: LaneFormState) => void;
   onConfirm: () => void;
   onOpen: (draft: FollowUpDraftHandle) => void;
+  onOpenJob: (jobId: string) => void;
 }) {
   const kind = lane.kind as LaneKind;
   const parsed = parseConceptKey(lane?.concept_key || "");
@@ -222,7 +231,7 @@ function FollowUpLane({
   );
   const studentIds = lane?.target_student_ids || [];
   const empty = !lane || !studentIds.length || Boolean(lane.empty_reason);
-  const canConfirm = !empty && !createdDraft && !queued && state.skillIds.length > 0 && state.skillIds.length <= 2 && !pending;
+  const canConfirm = !empty && !createdDraft && !queuedJobId && state.skillIds.length > 0 && state.skillIds.length <= 2 && !pending;
   const title = kind === "remedial" ? "Phụ đạo" : "Nâng cao";
   const selectedLabels = state.skillIds.map((id) => skillLabelById.get(id) || readableSkill(id));
 
@@ -301,13 +310,17 @@ function FollowUpLane({
             />
           </div>
           {error && <div className="inline-error"><WarningCircle size={16} className="inline mr-2" />{error}</div>}
-          {createdDraft ? (
+          {queuedJobId ? (
+            <button className="secondary-button follow-up-confirm" onClick={() => onOpenJob(queuedJobId)}>
+              <Sparkle size={17} weight="fill" /> Mở tiến trình tạo bài <ArrowRight size={16} />
+            </button>
+          ) : createdDraft ? (
             <button className="secondary-button follow-up-confirm" onClick={() => onOpen(createdDraft)}>
               <CheckCircle size={17} weight="fill" /> Mở bản nháp <ArrowRight size={16} />
             </button>
           ) : (
             <button className="primary-button follow-up-confirm" disabled={!canConfirm} onClick={onConfirm}>
-              <Sparkle size={17} weight="fill" />{pending || queued ? "Đang tạo bản nháp" : `Tạo bài ${kind === "remedial" ? "phụ đạo" : "nâng cao"}`} <ArrowRight size={16} />
+              <Sparkle size={17} weight="fill" />{pending ? "Đang tạo bản nháp" : `Tạo bài ${kind === "remedial" ? "phụ đạo" : "nâng cao"}`} <ArrowRight size={16} />
             </button>
           )}
         </>

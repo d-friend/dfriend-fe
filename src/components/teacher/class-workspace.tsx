@@ -22,7 +22,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { useMemo, useState, type CSSProperties, type FormEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { MathContent } from "@/components/shared/math-content";
 import { getApiErrorMessage, teacherApi } from "@/lib/api-client";
 import { skillDisplayName, skillLabelMap } from "@/lib/skill-labels";
@@ -35,11 +35,10 @@ export function ClassWorkspace({ classId }: { classId: string }) {
   const [query, setQuery] = useState("");
   const [addStudentsOpen, setAddStudentsOpen] = useState(false);
   const [detailWidth, setDetailWidth] = useState(() => {
-    if (typeof window === "undefined") return 430;
-    const saved = Number(window.localStorage.getItem("teacher-class-detail-width"));
-    return Number.isFinite(saved) && saved >= 340
-      ? Math.min(saved, Math.max(window.innerWidth - 520, 340))
-      : 430;
+    if (typeof window === "undefined") return 560;
+    const stored = window.localStorage.getItem("teacher-class-detail-width");
+    const saved = stored === null ? 560 : Number(stored);
+    return clampDetailWidth(Number.isFinite(saved) ? saved : 560, window.innerWidth);
   });
   const tab = normalizeTab(search.get("tab"));
   const selectedStudent = search.get("student");
@@ -47,18 +46,24 @@ export function ClassWorkspace({ classId }: { classId: string }) {
   const selectedReport = search.get("report");
   const hasSelection = Boolean(selectedStudent || selectedLesson || selectedReport);
 
+  useEffect(() => {
+    const clamp = () => setDetailWidth((current) => clampDetailWidth(current, window.innerWidth));
+    window.addEventListener("resize", clamp);
+    return () => window.removeEventListener("resize", clamp);
+  }, []);
+
   function startDetailResize(event: ReactPointerEvent<HTMLButtonElement>) {
     event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.userSelect = "none";
     const move = (pointer: PointerEvent) => {
-      const next = Math.min(
-        Math.max(window.innerWidth - pointer.clientX, 340),
-        Math.max(window.innerWidth - 520, 340),
-      );
-      setDetailWidth(next);
+      setDetailWidth(clampDetailWidth(window.innerWidth - pointer.clientX, window.innerWidth));
     };
     const stop = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", stop);
+      document.body.style.userSelect = previousUserSelect;
       setDetailWidth((current) => {
         window.localStorage.setItem("teacher-class-detail-width", String(current));
         return current;
@@ -66,6 +71,17 @@ export function ClassWorkspace({ classId }: { classId: string }) {
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", stop, { once: true });
+  }
+
+  function resizeDetailWithKeyboard(event: ReactKeyboardEvent<HTMLButtonElement>) {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const delta = event.key === "ArrowLeft" ? 32 : -32;
+    setDetailWidth((current) => {
+      const next = clampDetailWidth(current + delta, window.innerWidth);
+      window.localStorage.setItem("teacher-class-detail-width", String(next));
+      return next;
+    });
   }
 
   const classesQuery = useQuery({ queryKey: ["teacher", "classes"], queryFn: teacherApi.classes });
@@ -156,7 +172,18 @@ export function ClassWorkspace({ classId }: { classId: string }) {
         </div>
       </div>
 
-      <button className="class-detail-resizer" onPointerDown={startDetailResize} aria-label="Kéo để đổi độ rộng panel chi tiết" title="Kéo để đổi độ rộng" />
+      <button
+        className="class-detail-resizer"
+        role="separator"
+        aria-label="Đổi độ rộng panel chi tiết"
+        aria-orientation="vertical"
+        aria-valuemin={420}
+        aria-valuemax={Math.round(typeof window === "undefined" ? 960 : detailWidthLimits(window.innerWidth).max)}
+        aria-valuenow={Math.round(detailWidth)}
+        onKeyDown={resizeDetailWithKeyboard}
+        onPointerDown={startDetailResize}
+        title="Kéo hoặc dùng phím mũi tên để đổi độ rộng"
+      />
 
       <aside className="class-detail" aria-label="Chi tiết">
         {hasSelection && <button className="detail-back" onClick={clearSelection}><ArrowLeft size={17} /> Quay lại danh sách</button>}
@@ -207,18 +234,37 @@ function ReportList({ loading, error, reports, selected, onSelect }: { loading: 
         const children = report.reportId
           ? followUpsBySource.get(report.reportId) || []
           : [];
+        const childPublications = new Map<string, CopilotReportSummary[]>();
+        for (const child of children) {
+          const publicationId = child.publicationId || child.lessonId;
+          const versions = childPublications.get(publicationId) || [];
+          versions.push(child);
+          childPublications.set(publicationId, versions);
+        }
         return (
           <div className="report-family" key={`${report.classId || report.classIds[0]}:${reportSelectionId(report)}`}>
             <ReportRow report={report} selected={selected} onSelect={onSelect} />
-            {children.map((child) => (
-              <ReportRow
-                key={reportSelectionId(child)}
-                report={child}
-                selected={selected}
-                onSelect={onSelect}
-                nested
-              />
-            ))}
+            {[...childPublications.entries()].map(([publicationId, versions]) => {
+              const sorted = [...versions].sort((left, right) => (right.reportVersion || 0) - (left.reportVersion || 0));
+              const lane = sorted[0];
+              return (
+                <section className="report-lane-family" key={publicationId} aria-label={`${lane.lessonKind === "remedial" ? "Phụ đạo" : "Nâng cao"} từ report v${lane.sourceReportVersion || report.reportVersion || 1}`}>
+                  <div className="report-lane-heading">
+                    <strong>{lane.lessonKind === "remedial" ? "Phụ đạo" : "Nâng cao"}</strong>
+                    <span>{lane.completedStudents || 0}/{lane.totalStudents || 0} hoàn thành · {statusLabel(lane.status)}</span>
+                  </div>
+                  {sorted.map((child) => (
+                    <ReportRow
+                      key={reportSelectionId(child)}
+                      report={child}
+                      selected={selected}
+                      onSelect={onSelect}
+                      nested
+                    />
+                  ))}
+                </section>
+              );
+            })}
           </div>
         );
       })}
@@ -229,11 +275,14 @@ function ReportList({ loading, error, reports, selected, onSelect }: { loading: 
 function ReportRow({ report, selected, onSelect, nested = false }: { report: CopilotReportSummary; selected: string | null; onSelect: (id: string) => void; nested?: boolean }) {
   const id = reportSelectionId(report);
   const kindLabel = report.lessonKind === "remedial" ? "Kết quả phụ đạo" : report.lessonKind === "advanced" ? "Kết quả nâng cao" : "Báo cáo lớp";
-  return <button className={nested ? "report-row-nested" : ""} data-selected={selected !== null && reportSelectionIds(report).includes(selected)} onClick={() => onSelect(id)}><span className="report-status" data-status={report.status}>{report.status === "REPORT_READY" ? <CheckCircle size={18} weight="fill" /> : report.status === "FAILED" ? <WarningCircle size={18} /> : <ClockCounterClockwise size={18} />}</span><span className="entity-main"><small>{kindLabel}</small><strong>{report.title}</strong><small>{report.subject} / {report.topic}</small></span><span className="entity-action">{report.status === "REPORT_READY" ? "Xem báo cáo" : statusLabel(report.status)}</span></button>;
+  const version = report.reportVersion ? `v${report.reportVersion}` : "Chưa có version";
+  const completion = `${report.completedStudents || 0}/${report.totalStudents || 0} hoàn thành`;
+  const source = nested && report.sourceReportVersion ? `từ report v${report.sourceReportVersion}` : "";
+  return <button className={nested ? "report-row-nested" : ""} data-selected={selected !== null && reportSelectionIds(report).includes(selected)} onClick={() => onSelect(id)}><span className="report-status" data-status={report.status}>{report.status === "REPORT_READY" ? <CheckCircle size={18} weight="fill" /> : report.status === "FAILED" ? <WarningCircle size={18} /> : <ClockCounterClockwise size={18} />}</span><span className="entity-main"><small>{kindLabel} · {version}{source ? ` · ${source}` : ""}</small><strong>{report.title}</strong><small>{completion} · {statusLabel(report.status)} · publish {formatDate(report.publishedAt)}</small></span><span className="entity-action">{report.status === "REPORT_READY" ? "Xem báo cáo" : statusLabel(report.status)}</span></button>;
 }
 
 function reportSelectionId(report: CopilotReportSummary) {
-  return report.publicationId || report.reportId || report.lessonId;
+  return report.reportId || report.publicationId || report.lessonId;
 }
 
 function reportSelectionIds(report: CopilotReportSummary) {
@@ -400,6 +449,8 @@ function ListError({ error }: { error: unknown }) { return <div className="list-
 function ListEmpty({ icon, title, body, action }: { icon: React.ReactNode; title: string; body: string; action?: React.ReactNode }) { return <div className="list-empty">{icon}<h3>{title}</h3><p>{body}</p>{action}</div>; }
 function ClassSkeleton() { return <section className="class-workspace" data-detail-open="false"><div className="class-master p-6"><div className="skeleton h-32" /><div className="skeleton h-12 mt-4" /><ListSkeleton /></div><aside className="class-detail" aria-label="Chi tiết"><ListSkeleton /></aside></section>; }
 function normalizeTab(value: string | null): ClassTab { return value === "learning-path" || value === "reports" ? value : "students"; }
+function detailWidthLimits(viewportWidth: number) { return { min: 420, max: Math.max(420, Math.min(viewportWidth * 0.75, viewportWidth - 320)) }; }
+function clampDetailWidth(value: number, viewportWidth: number) { const limits = detailWidthLimits(viewportWidth); return Math.min(Math.max(value, limits.min), limits.max); }
 function normalizeScore10(value: number | null | undefined) { const numeric = Number(value || 0); return numeric > 10 && numeric <= 100 ? numeric / 10 : numeric; }
 function formatPercent(value: number) { return `${Math.round(value * 100)}%`; }
 function initials(value: string) { return value.split(/\s+/).slice(-2).map((part) => part[0]).join("").toUpperCase(); }
