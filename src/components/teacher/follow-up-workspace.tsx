@@ -1,48 +1,89 @@
 "use client";
 
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, ArrowRight, CheckCircle, Sparkle, Student, Target, UsersThree, WarningCircle } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { getApiErrorMessage, teacherApi, type FollowUpPlan, type FollowUpSuggestion } from "@/lib/api-client";
+import { getApiErrorMessage, teacherApi, type FollowUpDraftHandle, type FollowUpPlan, type FollowUpSuggestion } from "@/lib/api-client";
 
 type LaneKind = "remedial" | "advanced";
-type LaneState = Record<string, { skillIds: string[]; lessonGoal: string }>;
+type LaneFormState = { skillIds: string[]; lessonGoal: string; goalEdited: boolean };
+type LaneState = Record<string, LaneFormState>;
 
 export function FollowUpWorkspace({ lessonId }: { lessonId: string }) {
   const router = useRouter();
   const plan = useQuery({ queryKey: ["teacher", "copilot", lessonId, "follow-up-plan"], queryFn: () => teacherApi.followUpPlan(lessonId) });
   const [laneState, setLaneState] = useState<LaneState>({});
+  const [createdByKind, setCreatedByKind] = useState<Partial<Record<LaneKind, FollowUpDraftHandle>>>({});
+  const [pendingLaneKeys, setPendingLaneKeys] = useState<string[]>([]);
+  const [laneErrors, setLaneErrors] = useState<Record<string, string>>({});
   const [appliedPlanAt, setAppliedPlanAt] = useState("");
-  const createDraft = useMutation({
-    mutationFn: async ({ lane, laneKey }: { lane: FollowUpSuggestion; laneKey: string }) => {
-      if (!plan.data?.reportId) throw new Error("Kế hoạch chưa gắn với report snapshot.");
-      const selected = laneState[laneKey]?.skillIds || [];
-      const original = lane.target_skill_ids || [];
+
+  async function createLane(lane: FollowUpSuggestion, laneKey: string, reviewTab: Window) {
+    if (!plan.data?.reportId) {
+      reviewTab.close();
+      setLaneErrors((current) => ({ ...current, [laneKey]: "Kế hoạch chưa gắn với report snapshot." }));
+      return;
+    }
+    const kind = lane.kind as LaneKind;
+    const selected = laneState[laneKey]?.skillIds || [];
+    const original = lane.target_skill_ids || [];
+    setPendingLaneKeys((current) => [...new Set([...current, laneKey])]);
+    setLaneErrors((current) => ({ ...current, [laneKey]: "" }));
+    try {
       const result = await teacherApi.createFollowUpDraft(plan.data.lesson_id, {
         reportId: plan.data.reportId,
         planId: plan.data.planId,
-        kind: lane.kind as LaneKind,
+        kind,
         conceptKey: lane.concept_key,
         studentIds: lane.target_student_ids || [],
         skillIds: selected,
         lessonGoal: laneState[laneKey]?.lessonGoal || "",
         editedRecommendation: !sameSet(selected, original),
       });
-      return result;
-    },
-    onSuccess: (result) => {
-      router.push(`/teacher/lessons/${result.draft.aiLessonId}/review`);
-    },
-  });
+      setCreatedByKind((current) => ({ ...current, [kind]: result.draft }));
+      reviewTab.location.replace(`/teacher/lessons/${result.draft.aiLessonId}/review`);
+    } catch (error) {
+      reviewTab.close();
+      setLaneErrors((current) => ({
+        ...current,
+        [laneKey]: getApiErrorMessage(error, `Chưa tạo được bản nháp ${kind === "remedial" ? "phụ đạo" : "nâng cao"}.`),
+      }));
+    } finally {
+      setPendingLaneKeys((current) => current.filter((key) => key !== laneKey));
+    }
+  }
+
+  function reserveReviewTab() {
+    const tab = window.open("about:blank", "_blank");
+    if (tab) {
+      tab.document.title = "D-Friend · Đang tạo bản nháp";
+      tab.document.body.innerHTML = '<p style="font-family:system-ui;padding:32px">Đang tạo bản nháp follow-up…</p>';
+    }
+    return tab;
+  }
+
+  function createOne(lane: FollowUpSuggestion, laneKey: string) {
+    const tab = reserveReviewTab();
+    if (!tab) {
+      setLaneErrors((current) => ({ ...current, [laneKey]: "Trình duyệt đang chặn tab mới. Hãy cho phép pop-up rồi thử lại." }));
+      return;
+    }
+    void createLane(lane, laneKey, tab);
+  }
 
   useEffect(() => {
     if (!plan.data || appliedPlanAt === plan.data.generated_at) return;
     const timer = window.setTimeout(() => {
       setLaneState(Object.fromEntries((plan.data?.groups || []).map((lane, index) => [
         `${lane.kind}-${index}`,
-        { skillIds: lane.target_skill_ids?.slice(0, 2) || [], lessonGoal: "" },
+        {
+          skillIds: lane.target_skill_ids?.slice(0, 2) || [],
+          lessonGoal: buildLaneGoal(lane, plan.data as FollowUpPlan, lane.target_skill_ids?.slice(0, 2) || []),
+          goalEdited: false,
+        },
       ])));
+      setCreatedByKind(plan.data?.laneDrafts || {});
       setAppliedPlanAt(plan.data?.generated_at || "");
     }, 0);
     return () => window.clearTimeout(timer);
@@ -52,6 +93,22 @@ export function FollowUpWorkspace({ lessonId }: { lessonId: string }) {
     (lane) => (lane.target_student_ids || []).length > 0 && !lane.empty_reason,
   );
   const hasActionableLane = actionableLanes.length > 0;
+  const lanesAvailableForBoth = actionableLanes.filter((lane) => !createdByKind[lane.kind as LaneKind]);
+
+  function createBoth() {
+    const targets = lanesAvailableForBoth.map((lane) => ({
+      lane,
+      laneKey: `${lane.kind}-${(plan.data?.groups || []).indexOf(lane)}`,
+      tab: reserveReviewTab(),
+    }));
+    if (targets.some((target) => !target.tab)) {
+      targets.forEach((target) => target.tab?.close());
+      setLaneErrors((current) => ({ ...current, both: "Trình duyệt đang chặn tab mới. Hãy cho phép pop-up rồi thử lại." }));
+      return;
+    }
+    setLaneErrors((current) => ({ ...current, both: "" }));
+    targets.forEach((target) => void createLane(target.lane, target.laneKey, target.tab as Window));
+  }
 
   return (
     <section className="follow-up-page">
@@ -73,28 +130,41 @@ export function FollowUpWorkspace({ lessonId }: { lessonId: string }) {
 
       {plan.isLoading && <div className="generating-lesson !min-h-[28rem]"><span><Sparkle size={25} weight="fill" /></span><h1>Đang dựng kế hoạch follow-up</h1><p>Copilot đang đọc báo cáo lớp và tách nhóm cần phụ đạo hoặc nâng cao.</p><div className="generation-track"><i /></div></div>}
       {plan.isError && <div className="inline-error mt-6"><WarningCircle size={16} className="inline mr-2" />{getApiErrorMessage(plan.error, "Chưa tải được kế hoạch follow-up.")}</div>}
-      {createDraft.isError && <div className="inline-error mt-6"><WarningCircle size={16} className="inline mr-2" />{getApiErrorMessage(createDraft.error, "Chưa tạo được bản nháp follow-up.")}</div>}
+      {laneErrors.both && <div className="inline-error mt-6"><WarningCircle size={16} className="inline mr-2" />{laneErrors.both}</div>}
 
       {plan.data && !hasActionableLane && (
         <div className="empty-panel mt-8"><CheckCircle size={30} weight="fill" className="text-[var(--success)]" /><h2>Lớp đang tiến bộ khá đồng đều</h2><p>Không cần tách nhóm phụ đạo hoặc nâng cao cho bài học này.</p></div>
       )}
 
       {plan.data && hasActionableLane && (
+        <>
+        {lanesAvailableForBoth.length === 2 && (
+          <div className="report-actions mt-6">
+            <button className="primary-button" disabled={pendingLaneKeys.length > 0} onClick={createBoth}>
+              <Sparkle size={17} weight="fill" /> Tạo cả hai bài
+            </button>
+          </div>
+        )}
         <div className="follow-up-planner-grid">
           {actionableLanes.map((lane) => {
             const laneKey = `${lane.kind}-${(plan.data?.groups || []).indexOf(lane)}`;
+            const kind = lane.kind as LaneKind;
             return <FollowUpLane
               key={laneKey}
               lane={lane}
               laneKey={laneKey}
               plan={plan.data}
-              state={laneState[laneKey] || { skillIds: [], lessonGoal: "" }}
-              pending={createDraft.isPending}
+              state={laneState[laneKey] || { skillIds: [], lessonGoal: "", goalEdited: false }}
+              pending={pendingLaneKeys.includes(laneKey)}
+              createdDraft={createdByKind[kind]}
+              error={laneErrors[laneKey]}
               onStateChange={(next) => setLaneState((current) => ({ ...current, [laneKey]: next }))}
-              onConfirm={() => createDraft.mutate({ lane, laneKey })}
+              onConfirm={() => createOne(lane, laneKey)}
+              onOpen={(draft) => window.open(`/teacher/lessons/${draft.aiLessonId}/review`, "_blank", "noopener,noreferrer")}
             />;
           })}
         </div>
+        </>
       )}
     </section>
   );
@@ -106,16 +176,22 @@ function FollowUpLane({
   plan,
   state,
   pending,
+  createdDraft,
+  error,
   onStateChange,
   onConfirm,
+  onOpen,
 }: {
   lane: FollowUpSuggestion;
   laneKey: string;
   plan: FollowUpPlan;
-  state: { skillIds: string[]; lessonGoal: string };
+  state: LaneFormState;
   pending: boolean;
-  onStateChange: (state: { skillIds: string[]; lessonGoal: string }) => void;
+  createdDraft?: FollowUpDraftHandle;
+  error?: string;
+  onStateChange: (state: LaneFormState) => void;
   onConfirm: () => void;
+  onOpen: (draft: FollowUpDraftHandle) => void;
 }) {
   const kind = lane.kind as LaneKind;
   const parsed = parseConceptKey(lane?.concept_key || "");
@@ -131,7 +207,7 @@ function FollowUpLane({
   );
   const studentIds = lane?.target_student_ids || [];
   const empty = !lane || !studentIds.length || Boolean(lane.empty_reason);
-  const canConfirm = !empty && state.skillIds.length > 0 && state.skillIds.length <= 2 && !pending;
+  const canConfirm = !empty && !createdDraft && state.skillIds.length > 0 && state.skillIds.length <= 2 && !pending;
   const title = kind === "remedial" ? "Phụ đạo" : "Nâng cao";
   const selectedLabels = state.skillIds.map((id) => skillLabelById.get(id) || readableSkill(id));
 
@@ -178,12 +254,16 @@ function FollowUpLane({
                     checked={checked}
                     disabled={!checked && state.skillIds.length >= 2}
                     onChange={(event) =>
-                      onStateChange({
-                        ...state,
-                        skillIds: event.target.checked
+                      {
+                        const skillIds = event.target.checked
                           ? [...state.skillIds, skill.skill_id].slice(0, 2)
-                          : state.skillIds.filter((item) => item !== skill.skill_id),
-                      })
+                          : state.skillIds.filter((item) => item !== skill.skill_id);
+                        onStateChange({
+                          ...state,
+                          skillIds,
+                          lessonGoal: state.goalEdited ? state.lessonGoal : buildLaneGoal(lane, plan, skillIds),
+                        });
+                      }
                     }
                   />
                   <span><strong>{skill.label_vi}</strong><small>{skill.skill_id}</small></span>
@@ -201,17 +281,35 @@ function FollowUpLane({
               id={`goal-${laneKey}`}
               className="textarea"
               value={state.lessonGoal}
-              onChange={(event) => onStateChange({ ...state, lessonGoal: event.target.value })}
-              placeholder="Không bắt buộc"
+              onChange={(event) => onStateChange({ ...state, lessonGoal: event.target.value, goalEdited: true })}
+              placeholder="Mục tiêu follow-up"
             />
           </div>
-          <button className="primary-button follow-up-confirm" disabled={!canConfirm} onClick={onConfirm}>
-            <Sparkle size={17} weight="fill" />{pending ? "Đang tạo bản nháp" : "Tạo bản nháp"} <ArrowRight size={16} />
-          </button>
+          {error && <div className="inline-error"><WarningCircle size={16} className="inline mr-2" />{error}</div>}
+          {createdDraft ? (
+            <button className="secondary-button follow-up-confirm" onClick={() => onOpen(createdDraft)}>
+              <CheckCircle size={17} weight="fill" /> Mở bản nháp <ArrowRight size={16} />
+            </button>
+          ) : (
+            <button className="primary-button follow-up-confirm" disabled={!canConfirm} onClick={onConfirm}>
+              <Sparkle size={17} weight="fill" />{pending ? "Đang tạo bản nháp" : `Tạo bài ${kind === "remedial" ? "phụ đạo" : "nâng cao"}`} <ArrowRight size={16} />
+            </button>
+          )}
         </>
       )}
     </article>
   );
+}
+
+function buildLaneGoal(lane: FollowUpSuggestion, plan: FollowUpPlan, skillIds: string[]) {
+  const skills = skillIds.map(readableSkill).join(", ") || "các kỹ năng đã chọn";
+  const students = lane.target_student_ids?.length || 0;
+  const source = plan.parentLessonTitle ? ` sau bài “${plan.parentLessonTitle}”` : "";
+  const report = plan.reportVersion ? ` theo báo cáo lớp phiên bản ${plan.reportVersion}` : " theo báo cáo lớp";
+  if (lane.kind === "remedial") {
+    return `Đây là bài phụ đạo${source} dành cho ${students} học sinh${report} còn yếu ở ${skills}. Phiên kiến thức phải dạy lại đúng pattern và misconception của các kỹ năng này bằng ví dụ có hướng dẫn; không lùi sang prerequisite trừ khi có evidence trực tiếp ở ít nhất hai session khác nhau. Phiên luyện tập cần củng cố để học sinh tự làm được ${skills}, rồi kết thúc bằng một bài challenge vừa sức.`;
+  }
+  return `Đây là bài nâng cao${source} dành cho ${students} học sinh${report} đã sẵn sàng mở rộng ${skills}. Phiên kiến thức phải bắt đầu từ nền tảng các em đã chứng minh, giới thiệu biểu diễn hoặc pattern sâu hơn và không dạy lại kiến thức cơ bản. Phiên luyện tập cần có challenge, transfer/exploration và extension để học sinh vận dụng ${skills} trong tình huống mới.`;
 }
 
 function parseConceptKey(value: string) {

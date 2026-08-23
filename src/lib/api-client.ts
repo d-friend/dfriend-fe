@@ -94,22 +94,29 @@ export interface FollowUpPlan {
   reportId?: string;
   reportVersion?: number;
   reportHash?: string;
+  parentLessonTitle?: string;
+  laneDrafts?: Partial<Record<"remedial" | "advanced", FollowUpDraftHandle>>;
   studentNames?: Record<string, string>;
+}
+
+export interface FollowUpDraftHandle {
+  id: string;
+  groupType: "remedial" | "advanced";
+  studentIds: string[];
+  exercises: Array<Record<string, unknown>>;
+  summary: string;
+  aiLessonId: string;
+  publicationId?: string;
+  classId?: string;
+  sourceReportId?: string;
+  sourceReportVersion?: number;
+  published?: boolean;
 }
 
 export interface FollowUpDraftResult {
   created: boolean;
-  draft: {
-    id: string;
-    groupType: "remedial" | "advanced";
-    studentIds: string[];
-    exercises: Array<Record<string, unknown>>;
-    summary: string;
-    aiLessonId: string;
-    publicationId?: string;
-    classId?: string;
-    sourceReportId?: string;
-  };
+  reused?: boolean;
+  draft: FollowUpDraftHandle;
 }
 
 export interface CompletePoolResult {
