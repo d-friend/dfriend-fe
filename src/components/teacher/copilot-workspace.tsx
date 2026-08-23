@@ -327,7 +327,6 @@ function MessageBubble({ turn, classId }: { turn: DisplayTurn; classId: string }
 function LessonPlanCard({ plan, classId }: { plan: CopilotLessonPlan; classId: string }) {
   const router = useRouter();
   const [selected, setSelected] = useState(() => new Set(plan.skills.filter((skill) => skill.selected).map((skill) => skill.skillId)));
-  const [draft, setDraft] = useState<CopilotDraft | null>(null);
   const [activeJobId, setActiveJobId] = useState("");
   const [generationStep, setGenerationStep] = useState("Đang đưa yêu cầu vào hàng đợi");
   const [partial, setPartial] = useState<LessonGenerationResult | null>(null);
@@ -344,22 +343,12 @@ function LessonPlanCard({ plan, classId }: { plan: CopilotLessonPlan; classId: s
         allowGenerated,
       });
       setActiveJobId(queued.jobId);
-      return waitForLessonGeneration(queued.jobId, setGenerationStep);
+      return queued;
     },
-    onSuccess: (result) => {
-      if (result.generationStatus === "partial") {
-        setPartial(result);
-        return;
-      }
-      const lessonId = String(result.lessonId || "");
-      const nextDraft: CopilotDraft = {
-        lessonId,
-        problemCount: Number(result.problemCount || 0),
-        conceptKey: plan.conceptKey,
-        goalText: plan.goalText,
-      };
-      setDraft(nextDraft);
-      if (lessonId) router.push(`/teacher/lessons/${lessonId}/review`);
+    onSuccess: (queued) => {
+      router.push(
+        `/teacher/lessons/generating/${encodeURIComponent(queued.jobId)}?origin=copilot`,
+      );
     },
     onError: (mutationError) => {
       const requirement = generationConsentRequirement(mutationError);
@@ -385,8 +374,6 @@ function LessonPlanCard({ plan, classId }: { plan: CopilotLessonPlan; classId: s
       if (lessonId) router.push(`/teacher/lessons/${lessonId}/review`);
     },
   });
-
-  if (draft) return <DraftCard draft={draft} />;
 
   return (
     <section className="lesson-plan-card" aria-label="Xác nhận kế hoạch bài học">

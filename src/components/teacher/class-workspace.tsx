@@ -22,7 +22,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { useMemo, useState, type FormEvent } from "react";
+import { useMemo, useState, type CSSProperties, type FormEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { MathContent } from "@/components/shared/math-content";
 import { getApiErrorMessage, teacherApi } from "@/lib/api-client";
 import { skillDisplayName, skillLabelMap } from "@/lib/skill-labels";
@@ -34,11 +34,39 @@ export function ClassWorkspace({ classId }: { classId: string }) {
   const search = useSearchParams();
   const [query, setQuery] = useState("");
   const [addStudentsOpen, setAddStudentsOpen] = useState(false);
+  const [detailWidth, setDetailWidth] = useState(() => {
+    if (typeof window === "undefined") return 430;
+    const saved = Number(window.localStorage.getItem("teacher-class-detail-width"));
+    return Number.isFinite(saved) && saved >= 340
+      ? Math.min(saved, Math.max(window.innerWidth - 520, 340))
+      : 430;
+  });
   const tab = normalizeTab(search.get("tab"));
   const selectedStudent = search.get("student");
   const selectedLesson = search.get("lesson");
   const selectedReport = search.get("report");
   const hasSelection = Boolean(selectedStudent || selectedLesson || selectedReport);
+
+  function startDetailResize(event: ReactPointerEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    const move = (pointer: PointerEvent) => {
+      const next = Math.min(
+        Math.max(window.innerWidth - pointer.clientX, 340),
+        Math.max(window.innerWidth - 520, 340),
+      );
+      setDetailWidth(next);
+    };
+    const stop = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+      setDetailWidth((current) => {
+        window.localStorage.setItem("teacher-class-detail-width", String(current));
+        return current;
+      });
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop, { once: true });
+  }
 
   const classesQuery = useQuery({ queryKey: ["teacher", "classes"], queryFn: teacherApi.classes });
   const studentsQuery = useQuery({ queryKey: ["teacher", "classes", classId, "students"], queryFn: () => teacherApi.students(classId) });
@@ -95,7 +123,7 @@ export function ClassWorkspace({ classId }: { classId: string }) {
   }
 
   return (
-    <section className="class-workspace" data-detail-open={hasSelection}>
+    <section className="class-workspace" data-detail-open={hasSelection} style={{ "--detail-width": `${detailWidth}px` } as CSSProperties}>
       <div className="class-master">
         <header className="class-header">
           <div className="class-heading-copy">
@@ -128,6 +156,8 @@ export function ClassWorkspace({ classId }: { classId: string }) {
         </div>
       </div>
 
+      <button className="class-detail-resizer" onPointerDown={startDetailResize} aria-label="Kéo để đổi độ rộng panel chi tiết" title="Kéo để đổi độ rộng" />
+
       <aside className="class-detail" aria-label="Chi tiết">
         {hasSelection && <button className="detail-back" onClick={clearSelection}><ArrowLeft size={17} /> Quay lại danh sách</button>}
         {selectedStudent ? <StudentDetail classId={classId} studentId={selectedStudent} studentName={studentsQuery.data?.find((student) => student.student_id === selectedStudent)?.full_name || "Học sinh"} /> : selectedLesson ? <LessonDetail lesson={roadmapQuery.data?.find((lesson) => lesson.id === selectedLesson || lesson.lessonId === selectedLesson)} studentCount={currentClass.student_count} /> : selectedReport ? <ReportDetail summary={selectedReportSummary} classId={classId} completedCount={selectedReportSummary?.completedStudents ?? selectedReportLesson?.completedCount ?? 0} studentCount={selectedReportSummary?.totalStudents ?? currentClass.student_count} /> : <DetailEmpty tab={tab} />}
@@ -158,7 +188,48 @@ function ReportList({ loading, error, reports, selected, onSelect }: { loading: 
   if (loading) return <ListSkeleton />;
   if (error) return <ListError error={error} />;
   if (!reports.length) return <ListEmpty icon={<ClipboardText size={26} />} title="Chưa có báo cáo" body="Báo cáo xuất hiện sau deadline khi lớp đã có dữ liệu làm bài." />;
-  return <div className="entity-list report-list">{reports.map((report) => { const id = reportSelectionId(report); return <button key={`${report.classId || report.classIds[0]}:${id}`} data-selected={selected !== null && reportSelectionIds(report).includes(selected)} onClick={() => onSelect(id)}><span className="report-status" data-status={report.status}>{report.status === "REPORT_READY" ? <CheckCircle size={18} weight="fill" /> : report.status === "FAILED" ? <WarningCircle size={18} /> : <ClockCounterClockwise size={18} />}</span><span className="entity-main"><strong>{report.title}</strong><small>{report.subject} / {report.topic}</small></span><span className="entity-action">{report.status === "REPORT_READY" ? "Xem báo cáo" : statusLabel(report.status)}</span></button>; })}</div>;
+  const followUpsBySource = new Map<string, CopilotReportSummary[]>();
+  for (const report of reports) {
+    if (!report.sourceReportId) continue;
+    const current = followUpsBySource.get(report.sourceReportId) || [];
+    current.push(report);
+    followUpsBySource.set(report.sourceReportId, current);
+  }
+  const mainReports = reports.filter(
+    (report) =>
+      report.reportKind !== "follow_up_outcome" &&
+      report.lessonKind !== "remedial" &&
+      report.lessonKind !== "advanced",
+  );
+  return (
+    <div className="entity-list report-list">
+      {mainReports.map((report) => {
+        const children = report.reportId
+          ? followUpsBySource.get(report.reportId) || []
+          : [];
+        return (
+          <div className="report-family" key={`${report.classId || report.classIds[0]}:${reportSelectionId(report)}`}>
+            <ReportRow report={report} selected={selected} onSelect={onSelect} />
+            {children.map((child) => (
+              <ReportRow
+                key={reportSelectionId(child)}
+                report={child}
+                selected={selected}
+                onSelect={onSelect}
+                nested
+              />
+            ))}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function ReportRow({ report, selected, onSelect, nested = false }: { report: CopilotReportSummary; selected: string | null; onSelect: (id: string) => void; nested?: boolean }) {
+  const id = reportSelectionId(report);
+  const kindLabel = report.lessonKind === "remedial" ? "Kết quả phụ đạo" : report.lessonKind === "advanced" ? "Kết quả nâng cao" : "Báo cáo lớp";
+  return <button className={nested ? "report-row-nested" : ""} data-selected={selected !== null && reportSelectionIds(report).includes(selected)} onClick={() => onSelect(id)}><span className="report-status" data-status={report.status}>{report.status === "REPORT_READY" ? <CheckCircle size={18} weight="fill" /> : report.status === "FAILED" ? <WarningCircle size={18} /> : <ClockCounterClockwise size={18} />}</span><span className="entity-main"><small>{kindLabel}</small><strong>{report.title}</strong><small>{report.subject} / {report.topic}</small></span><span className="entity-action">{report.status === "REPORT_READY" ? "Xem báo cáo" : statusLabel(report.status)}</span></button>;
 }
 
 function reportSelectionId(report: CopilotReportSummary) {
@@ -282,7 +353,19 @@ function ReportDetail({ summary, classId, completedCount, studentCount }: { summ
   if (!data?.report) return <div className="detail-content"><p className="workspace-kicker">Báo cáo bài học</p><h2>{summary.title}</h2><ListEmpty icon={<WarningCircle size={25} />} title="Báo cáo chưa có nội dung" body="Trạng thái đã hoàn tất nhưng dữ liệu phân tích đang trống. Thử tải lại sau." />{runAction}</div>;
   const skill = data.report;
   const labels = skillLabelMap(skillLabels.data);
-  return <div className="detail-content report-detail"><p className="workspace-kicker">Báo cáo bài học</p><h2>{data.title}</h2><p className="detail-lead">Phiên bản {data.reportVersion || 1}, phân tích từ {data.totalStudents} học sinh, thang điểm {skill.score_scale}.</p><SkillPerformanceTable metrics={skill.skill_metrics} labels={labels} /><section className="detail-section"><h3>Kỹ năng lớp làm tốt</h3><SkillChips items={skill.strengths} labels={labels} empty="Chưa có kỹ năng nổi bật." /></section><section className="detail-section"><h3>Cần củng cố</h3><SkillChips items={skill.top_weak_skill_ids.length ? skill.top_weak_skill_ids : skill.gaps} labels={labels} empty="Không có khoảng trống kỹ năng đáng kể." warning /></section>{skill.not_assessed_skill_ids?.length ? <section className="detail-section"><h3>Chưa được đánh giá</h3><SkillChips items={skill.not_assessed_skill_ids} labels={labels} empty="" /></section> : null}<GroupList title="Cần phụ đạo" ids={skill.remedial_student_ids} names={skill.student_names} /><GroupList title="Đang theo kịp" ids={skill.on_track_student_ids || []} names={skill.student_names} /><GroupList title="Có thể nâng cao" ids={skill.advanced_student_ids} names={skill.student_names} /><GroupList title="Chưa hoàn thành" ids={skill.not_finished_student_ids} names={skill.student_names} />{skill.not_assessed_student_ids?.length ? <GroupList title="Đã hoàn thành nhưng chưa có evidence" ids={skill.not_assessed_student_ids} names={skill.student_names} /> : null}{runAction}<section className="report-actions"><Link className="primary-button" href={`/teacher/copilot/${reportId}/extra`}><Sparkle size={16} weight="fill" /> Tạo bài follow-up</Link><Link className="secondary-button" href={`/teacher/lessons/new?fromReport=${reportId}`}>Tạo bài tiếp theo</Link></section></div>;
+  const followUpReport = data.reportKind === "follow_up_outcome";
+  return <div className="detail-content report-detail"><p className="workspace-kicker">{followUpReport ? data.lessonKind === "remedial" ? "Kết quả phụ đạo" : "Kết quả nâng cao" : "Báo cáo bài học"}</p><h2>{data.title}</h2><p className="detail-lead">Phiên bản {data.reportVersion || 1}, phân tích từ {data.totalStudents} học sinh, thang điểm {skill.score_scale}.</p><SkillPerformanceTable metrics={skill.skill_metrics} labels={labels} />{followUpReport ? <FollowUpOutcomes outcomes={skill.follow_up_student_outcomes} deltas={skill.follow_up_skill_deltas} names={skill.student_names} labels={labels} /> : <><section className="detail-section"><h3>Kỹ năng lớp làm tốt</h3><SkillChips items={skill.strengths} labels={labels} empty="Chưa có kỹ năng nổi bật." /></section><section className="detail-section"><h3>Cần củng cố</h3><SkillChips items={skill.top_weak_skill_ids.length ? skill.top_weak_skill_ids : skill.gaps} labels={labels} empty="Không có khoảng trống kỹ năng đáng kể." warning /></section>{skill.not_assessed_skill_ids?.length ? <section className="detail-section"><h3>Chưa được đánh giá</h3><SkillChips items={skill.not_assessed_skill_ids} labels={labels} empty="" /></section> : null}<GroupList title="Cần phụ đạo" ids={skill.remedial_student_ids} names={skill.student_names} /><GroupList title="Đang theo kịp" ids={skill.on_track_student_ids || []} names={skill.student_names} /><GroupList title="Có thể nâng cao" ids={skill.advanced_student_ids} names={skill.student_names} /></>}<GroupList title="Chưa hoàn thành" ids={skill.not_finished_student_ids} names={skill.student_names} />{skill.not_assessed_student_ids?.length ? <GroupList title="Đã hoàn thành nhưng chưa có evidence" ids={skill.not_assessed_student_ids} names={skill.student_names} /> : null}{runAction}<section className="report-actions">{data.canPlanFollowUp && <Link className="primary-button" href={`/teacher/copilot/${reportId}/extra`}><Sparkle size={16} weight="fill" /> Tạo bài follow-up</Link>}<Link className="secondary-button" href={`/teacher/lessons/new?fromReport=${reportId}`}>Tạo bài tiếp theo</Link></section></div>;
+}
+
+function FollowUpOutcomes({ outcomes, deltas, names, labels }: { outcomes?: NonNullable<CopilotReportDetail["report"]>["follow_up_student_outcomes"]; deltas?: NonNullable<CopilotReportDetail["report"]>["follow_up_skill_deltas"]; names: Record<string, string>; labels: Record<string, string> }) {
+  const outcomeRows = Object.entries(outcomes || {});
+  const deltaRows = Object.values(deltas || {});
+  return <><section className="detail-section"><h3>Kết quả từng học sinh</h3>{outcomeRows.length ? <div className="follow-up-outcome-list">{outcomeRows.map(([studentId, outcome]) => <div key={studentId}><span><strong>{names[studentId] || studentId}</strong><small>{outcome.assessed_skill_ids.map((skill) => skillDisplayName(skill, labels)).join(", ") || "Chưa đủ evidence"}</small></span><b>{followUpOutcomeLabel(outcome.status)}</b></div>)}</div> : <p className="muted-copy">Chưa có outcome học sinh.</p>}</section>{deltaRows.length ? <section className="detail-section"><h3>Thay đổi so với report nguồn</h3><div className="follow-up-delta-list">{deltaRows.map((delta) => <div key={delta.skill_id}><span>{skillDisplayName(delta.skill_id, labels)}</span><strong>{delta.delta == null ? "Chưa đủ dữ liệu" : `${delta.delta >= 0 ? "+" : ""}${delta.delta.toFixed(1)}`}</strong></div>)}</div></section> : null}</>;
+}
+
+function followUpOutcomeLabel(value: string) {
+  const labels: Record<string, string> = { recovered: "Đã phục hồi", developing: "Đang tiến bộ", still_needs_support: "Còn cần hỗ trợ", extended: "Đã mở rộng", sustained: "Duy trì tốt", needs_consolidation: "Cần củng cố", not_assessed: "Chưa đánh giá" };
+  return labels[value] || value;
 }
 
 type SkillMetric = NonNullable<NonNullable<CopilotReportDetail["report"]>["skill_metrics"]>[string];

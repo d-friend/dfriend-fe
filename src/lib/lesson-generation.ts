@@ -6,6 +6,7 @@ export type LessonGenerationResult = Record<string, unknown> & {
   generationStatus?: "complete" | "partial" | null;
   generationCompletedSlots?: number;
   generationTotalSlots?: number;
+  generationMissingSlotIds?: string[];
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -23,9 +24,10 @@ export async function waitForLessonGeneration(
     if (progress === "precheck") onStage("Đang kiểm tra kỹ năng và nguồn bài phù hợp");
     if (progress === "knowledge") onStage("Đang soạn Session 1 theo kỹ năng và mục tiêu");
     if (progress === "partial") onStage("Đã giữ phần đạt chuẩn, còn một số slot cần tạo tiếp");
-    if (job.status === "ready" && isRecord(job.result)) return job.result;
+    if (["ready", "partial"].includes(String(job.status)) && isRecord(job.result)) return job.result;
     if (job.status === "failed") {
-      const error = new Error(String(job.error || "Không thể tạo bài học."));
+      const jobError = isRecord(job.error) ? job.error.message : job.error;
+      const error = new Error(String(jobError || "Không thể tạo bài học."));
       error.name = "LessonGenerationFailed";
       throw error;
     }

@@ -96,6 +96,7 @@ export interface FollowUpPlan {
   reportHash?: string;
   parentLessonTitle?: string;
   laneDrafts?: Partial<Record<"remedial" | "advanced", FollowUpDraftHandle>>;
+  laneJobs?: Partial<Record<"remedial" | "advanced", string>>;
   studentNames?: Record<string, string>;
 }
 
@@ -116,7 +117,12 @@ export interface FollowUpDraftHandle {
 export interface FollowUpDraftResult {
   created: boolean;
   reused?: boolean;
-  draft: FollowUpDraftHandle;
+  queued?: boolean;
+  jobId?: string;
+  requestId?: string;
+  generationRunId?: string;
+  kind?: "remedial" | "advanced";
+  draft?: FollowUpDraftHandle;
 }
 
 export interface CompletePoolResult {
@@ -342,7 +348,7 @@ export const teacherApi = {
       await apiClient.post<Record<string, unknown>>(
         "/exercises/create-lesson/lesson1",
         body,
-        { timeout: 360_000 },
+        { timeout: 30_000 },
       )
     ).data,
   lessonGenerationJob: async (jobId: string) =>

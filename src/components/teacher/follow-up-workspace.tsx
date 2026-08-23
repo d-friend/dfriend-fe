@@ -15,6 +15,7 @@ export function FollowUpWorkspace({ lessonId }: { lessonId: string }) {
   const plan = useQuery({ queryKey: ["teacher", "copilot", lessonId, "follow-up-plan"], queryFn: () => teacherApi.followUpPlan(lessonId) });
   const [laneState, setLaneState] = useState<LaneState>({});
   const [createdByKind, setCreatedByKind] = useState<Partial<Record<LaneKind, FollowUpDraftHandle>>>({});
+  const [queuedByKind, setQueuedByKind] = useState<Partial<Record<LaneKind, string>>>({});
   const [pendingLaneKeys, setPendingLaneKeys] = useState<string[]>([]);
   const [laneErrors, setLaneErrors] = useState<Record<string, string>>({});
   const [appliedPlanAt, setAppliedPlanAt] = useState("");
@@ -41,8 +42,18 @@ export function FollowUpWorkspace({ lessonId }: { lessonId: string }) {
         lessonGoal: laneState[laneKey]?.lessonGoal || "",
         editedRecommendation: !sameSet(selected, original),
       });
-      setCreatedByKind((current) => ({ ...current, [kind]: result.draft }));
-      reviewTab.location.replace(`/teacher/lessons/${result.draft.aiLessonId}/review`);
+      if (result.draft) {
+        setCreatedByKind((current) => ({ ...current, [kind]: result.draft }));
+        reviewTab.location.replace(`/teacher/lessons/${result.draft.aiLessonId}/review`);
+        return;
+      }
+      if (!result.jobId) {
+        throw new Error("Backend chưa trả request ID cho generation job.");
+      }
+      setQueuedByKind((current) => ({ ...current, [kind]: result.jobId }));
+      reviewTab.location.replace(
+        `/teacher/lessons/generating/${encodeURIComponent(result.jobId)}?kind=${kind}&origin=copilot`,
+      );
     } catch (error) {
       reviewTab.close();
       setLaneErrors((current) => ({
@@ -84,6 +95,7 @@ export function FollowUpWorkspace({ lessonId }: { lessonId: string }) {
         },
       ])));
       setCreatedByKind(plan.data?.laneDrafts || {});
+      setQueuedByKind(plan.data?.laneJobs || {});
       setAppliedPlanAt(plan.data?.generated_at || "");
     }, 0);
     return () => window.clearTimeout(timer);
@@ -93,7 +105,7 @@ export function FollowUpWorkspace({ lessonId }: { lessonId: string }) {
     (lane) => (lane.target_student_ids || []).length > 0 && !lane.empty_reason,
   );
   const hasActionableLane = actionableLanes.length > 0;
-  const lanesAvailableForBoth = actionableLanes.filter((lane) => !createdByKind[lane.kind as LaneKind]);
+  const lanesAvailableForBoth = actionableLanes.filter((lane) => !createdByKind[lane.kind as LaneKind] && !queuedByKind[lane.kind as LaneKind]);
 
   function createBoth() {
     const targets = lanesAvailableForBoth.map((lane) => ({
@@ -156,6 +168,7 @@ export function FollowUpWorkspace({ lessonId }: { lessonId: string }) {
               plan={plan.data}
               state={laneState[laneKey] || { skillIds: [], lessonGoal: "", goalEdited: false }}
               pending={pendingLaneKeys.includes(laneKey)}
+              queued={Boolean(queuedByKind[kind])}
               createdDraft={createdByKind[kind]}
               error={laneErrors[laneKey]}
               onStateChange={(next) => setLaneState((current) => ({ ...current, [laneKey]: next }))}
@@ -176,6 +189,7 @@ function FollowUpLane({
   plan,
   state,
   pending,
+  queued,
   createdDraft,
   error,
   onStateChange,
@@ -187,6 +201,7 @@ function FollowUpLane({
   plan: FollowUpPlan;
   state: LaneFormState;
   pending: boolean;
+  queued: boolean;
   createdDraft?: FollowUpDraftHandle;
   error?: string;
   onStateChange: (state: LaneFormState) => void;
@@ -207,7 +222,7 @@ function FollowUpLane({
   );
   const studentIds = lane?.target_student_ids || [];
   const empty = !lane || !studentIds.length || Boolean(lane.empty_reason);
-  const canConfirm = !empty && !createdDraft && state.skillIds.length > 0 && state.skillIds.length <= 2 && !pending;
+  const canConfirm = !empty && !createdDraft && !queued && state.skillIds.length > 0 && state.skillIds.length <= 2 && !pending;
   const title = kind === "remedial" ? "Phụ đạo" : "Nâng cao";
   const selectedLabels = state.skillIds.map((id) => skillLabelById.get(id) || readableSkill(id));
 
@@ -292,7 +307,7 @@ function FollowUpLane({
             </button>
           ) : (
             <button className="primary-button follow-up-confirm" disabled={!canConfirm} onClick={onConfirm}>
-              <Sparkle size={17} weight="fill" />{pending ? "Đang tạo bản nháp" : `Tạo bài ${kind === "remedial" ? "phụ đạo" : "nâng cao"}`} <ArrowRight size={16} />
+              <Sparkle size={17} weight="fill" />{pending || queued ? "Đang tạo bản nháp" : `Tạo bài ${kind === "remedial" ? "phụ đạo" : "nâng cao"}`} <ArrowRight size={16} />
             </button>
           )}
         </>

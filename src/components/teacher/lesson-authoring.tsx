@@ -278,7 +278,13 @@ export function LessonAuthoring() {
       if (draftExerciseId) form1.append("lessonId", draftExerciseId);
       if (allowGenerated) form1.append("allowGenerated", "true");
       const queued = await teacherApi.generateLesson1(form1);
-      if (queued.jobId) setActiveJobId(String(queued.jobId));
+      if (queued.jobId) {
+        setActiveJobId(String(queued.jobId));
+        router.push(
+          `/teacher/lessons/generating/${encodeURIComponent(String(queued.jobId))}?origin=wizard`,
+        );
+        return;
+      }
       const lesson1 = queued.jobId
         ? await waitForLessonGeneration(String(queued.jobId), setGenerationStep)
         : queued;

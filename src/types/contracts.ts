@@ -298,6 +298,14 @@ export interface CopilotReportSummary {
   reportVersion?: number;
   reportHash?: string;
   publicationId?: string;
+  lessonKind?: "main" | "remedial" | "advanced";
+  reportKind?: "main_outcome" | "follow_up_outcome" | null;
+  sourceReportId?: string | null;
+  sourceReportVersion?: number | null;
+  sourceReportHash?: string | null;
+  parentPublicationId?: string | null;
+  canPlanFollowUp?: boolean;
+  canCreateNextMain?: boolean;
   lessonId: string;
   title: string;
   subject: string;
@@ -338,6 +346,17 @@ export interface CopilotReportDetail extends CopilotReportSummary {
       independence: number;
       reasoning: number;
       transfer?: number | null;
+    }>;
+    follow_up_skill_deltas?: Record<string, {
+      skill_id: string;
+      baseline_average?: number | null;
+      follow_up_average?: number | null;
+      delta?: number | null;
+    }>;
+    follow_up_student_outcomes?: Record<string, {
+      status: "recovered" | "developing" | "still_needs_support" | "extended" | "sustained" | "needs_consolidation" | "not_assessed";
+      assessed_skill_ids: string[];
+      baseline_gap_skill_ids: string[];
     }>;
     student_names: Record<string, string>;
     score_scale: number;
