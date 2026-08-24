@@ -12,6 +12,12 @@ export type StudyStreamEvent =
       awaiting_reasoning?: boolean;
       spam?: boolean;
       is_correct?: boolean | null;
+      answer_verdict?: "CORRECT" | "INCORRECT" | "NOT_AN_ANSWER" | "UNDETERMINED" | null;
+      approach_verdict?: "CORRECT" | "WEAK" | "INCORRECT" | "NOT_AN_ANSWER" | "INSUFFICIENT_EVIDENCE" | null;
+      answer_confidence?: number | null;
+      approach_confidence?: number | null;
+      needs_clarification?: boolean;
+      advanced?: boolean;
       state_updated?: boolean;
       session_completed?: boolean;
       completed_problem_count?: number;
