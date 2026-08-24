@@ -14,10 +14,14 @@ export type StudyStreamEvent =
       is_correct?: boolean | null;
       answer_verdict?: "CORRECT" | "INCORRECT" | "NOT_AN_ANSWER" | "UNDETERMINED" | null;
       approach_verdict?: "CORRECT" | "WEAK" | "INCORRECT" | "NOT_AN_ANSWER" | "INSUFFICIENT_EVIDENCE" | null;
+      approach_quality?: "SOUND" | "FRAGILE" | "INCORRECT" | "NOT_ASSESSED" | "UNDETERMINED" | null;
+      reasoning_evidence_verdict?: "SUFFICIENT" | "INSUFFICIENT" | "CONTRADICTORY" | "NOT_REQUIRED" | null;
+      reasoning_evidence_confidence?: number | null;
       answer_confidence?: number | null;
       approach_confidence?: number | null;
       needs_clarification?: boolean;
       advanced?: boolean;
+      terminal_resolution?: "MASTERED" | "ANSWER_ACCEPTED" | "UNRESOLVED_AFTER_REPAIR" | "INCORRECT_TERMINAL" | null;
       state_updated?: boolean;
       session_completed?: boolean;
       completed_problem_count?: number;
