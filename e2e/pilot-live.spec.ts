@@ -15,6 +15,9 @@ let pilot: PilotConfig;
 const generationTimeoutMs = Number(process.env.E2E_GENERATION_TIMEOUT_MS || 10 * 60_000);
 
 let className = "";
+let secondClassName = "";
+let classId = "";
+let secondClassId = "";
 
 test.describe.configure({ mode: "serial" });
 
@@ -32,13 +35,26 @@ test.beforeAll(() => {
 });
 
 test("live pilot: teacher creates a class, adds the student, uploads material, and publishes a wizard lesson", async ({ page }) => {
-  className = `E2E Pilot ${Date.now()}`;
+  const runId = Date.now();
+  className = `E2E Primary ${runId}`;
+  secondClassName = `E2E Secondary ${runId}`;
 
   await login(page, pilot.teacherUsername, pilot.teacherPassword, /\/teacher\/copilot\/new$/);
-  await createClass(page, className);
+  classId = await createClass(page, className);
+  await addStudent(page, pilot.studentUsername);
+  secondClassId = await createClass(page, secondClassName);
   await addStudent(page, pilot.studentUsername);
   await uploadDocument(page, className);
-  await publishWizardLesson(page, className);
+  await publishWizardLesson(page, [className, secondClassName]);
+
+  const [firstRoadmap, secondRoadmap] = await Promise.all([
+    authenticatedJson<Array<{ id: string; lessonId: string }>>(page, `/api/student/classes/${classId}/roadmap`),
+    authenticatedJson<Array<{ id: string; lessonId: string }>>(page, `/api/student/classes/${secondClassId}/roadmap`),
+  ]);
+  expect(firstRoadmap[0]?.id).toBeTruthy();
+  expect(secondRoadmap[0]?.id).toBeTruthy();
+  expect(firstRoadmap[0].id).not.toBe(secondRoadmap[0].id);
+  expect(firstRoadmap[0].lessonId).toBe(secondRoadmap[0].lessonId);
 });
 
 test("live pilot: teacher can create and publish a second lesson through Copilot", async ({ page }) => {
@@ -106,7 +122,7 @@ async function login(page: Page, username: string, password: string, destination
   await page.waitForURL(destination);
 }
 
-async function createClass(page: Page, name: string) {
+async function createClass(page: Page, name: string): Promise<string> {
   await page.goto("/teacher/classes");
   const createClassButton = page.getByRole("button", { name: "Tạo lớp mới", exact: true });
   await createClassButton.click({ force: true });
@@ -116,6 +132,9 @@ async function createClass(page: Page, name: string) {
   await page.getByRole("button", { name: "Tạo lớp", exact: true }).click();
   await page.waitForURL(/\/teacher\/classes\/[^?]+\?tab=students$/);
   await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
+  const match = page.url().match(/\/teacher\/classes\/([^?]+)/);
+  if (!match?.[1]) throw new Error(`Class ${name} was created without a stable class id in the URL.`);
+  return decodeURIComponent(match[1]);
 }
 
 async function addStudent(page: Page, username: string) {
@@ -146,7 +165,8 @@ async function uploadDocument(page: Page, name: string) {
   await expect(page.getByRole("heading", { name: `${name} - nguồn đa thức`, exact: true })).toBeVisible();
 }
 
-async function publishWizardLesson(page: Page, name: string) {
+async function publishWizardLesson(page: Page, classNames: string[]) {
+  const [name] = classNames;
   await page.goto("/teacher/lessons/new");
   await page.getByLabel("Tên bài học", { exact: true }).fill(`${name} - ôn tập đơn thức`);
   await page.getByLabel("Mục tiêu bài học", { exact: true }).fill(
@@ -155,7 +175,9 @@ async function publishWizardLesson(page: Page, name: string) {
   await page.getByLabel("Môn học", { exact: true }).selectOption(pilot.subject);
   await page.getByLabel("Chủ đề", { exact: true }).selectOption(pilot.topic);
   await page.getByLabel("Khái niệm", { exact: true }).selectOption(pilot.concept);
-  await page.locator(".class-picker label").filter({ hasText: name }).locator('input[type="checkbox"]').check();
+  for (const className of classNames) {
+    await page.locator(".class-picker label").filter({ hasText: className }).locator('input[type="checkbox"]').check();
+  }
   await page.getByRole("button", { name: "Kiểm tra và tạo bài", exact: true }).click();
 
   const consent = page.getByRole("button", { name: "Cho phép AI soạn phần thiếu", exact: true });
@@ -167,6 +189,12 @@ async function publishWizardLesson(page: Page, name: string) {
   if (await consent.isVisible()) await consent.click();
   await expect(approve).toBeVisible({ timeout: generationTimeoutMs });
   await approveAndPublish(page);
+}
+
+async function authenticatedJson<T>(page: Page, path: string): Promise<T> {
+  const response = await page.request.get(path);
+  expect(response.ok(), `${path} returned ${response.status()}`).toBeTruthy();
+  return response.json() as Promise<T>;
 }
 
 async function approveAndPublish(page: Page) {

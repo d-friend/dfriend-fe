@@ -6,6 +6,7 @@ import {
   ArrowClockwise,
   ChalkboardTeacher,
   ChartLineUp,
+  ClockCounterClockwise,
   ClipboardText,
   EnvelopeSimple,
   FileText,
@@ -21,6 +22,7 @@ import {
   UserPlus,
   UsersThree,
 } from "@phosphor-icons/react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { adminApi, apiClient, getApiErrorMessage } from "@/lib/api-client";
 import type { AdminUser, TeacherInviteStatus } from "@/types/contracts";
@@ -388,12 +390,16 @@ export function AdminWorkspace() {
           </div>
         </section>
         <section className="admin-panel">
-          <div className="admin-panel-heading"><span><ChartLineUp size={19} /></span><div><h2>Activity stream</h2><p>Event mới nhất toàn hệ thống.</p></div></div>
+          <div className="admin-panel-heading"><span><ClockCounterClockwise size={19} /></span><div><h2>Product timeline</h2><p>Event log mới nhất từ Mongo.</p></div></div>
           <div className="admin-feed-list">
             {(overview.data?.recentActivities || []).map((item) => (
               <article key={item.id}><strong>{item.eventType}</strong><span>{item.source}{item.classId ? ` / class ${item.classId.slice(0, 8)}` : ""}</span><time>{formatTime(item.createdAt)}</time></article>
             ))}
+            {!(overview.data?.recentActivities || []).length && <p className="admin-empty">Chưa có product event.</p>}
           </div>
+          <Link className="secondary-button admin-panel-link" href="/admin/events">
+            <ClockCounterClockwise size={16} /> Mở timeline
+          </Link>
         </section>
       </section>
     </main>

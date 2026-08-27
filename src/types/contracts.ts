@@ -81,13 +81,46 @@ export interface AdminOverview {
   }>;
   recentActivities: Array<{
     id: string;
-    userId: string;
+    actorUserId?: string | null;
+    actorRole?: string | null;
+    studentId?: string | null;
     eventType: string;
     source: string;
     classId?: string | null;
     lessonId?: string | null;
+    sessionId?: string | null;
+    subject?: string | null;
+    topic?: string | null;
+    conceptKey?: string | null;
+    metadata?: Record<string, unknown> | null;
+    ip?: string | null;
+    userAgent?: string | null;
     createdAt: string;
   }>;
+}
+
+export interface ProductEvent {
+  id: string;
+  eventType: string;
+  source: string;
+  actorUserId?: string | null;
+  actorRole?: string | null;
+  studentId?: string | null;
+  classId?: string | null;
+  lessonId?: string | null;
+  sessionId?: string | null;
+  subject?: string | null;
+  topic?: string | null;
+  conceptKey?: string | null;
+  metadata?: Record<string, unknown> | null;
+  ip?: string | null;
+  userAgent?: string | null;
+  createdAt: string;
+}
+
+export interface ProductEventPage {
+  data: ProductEvent[];
+  nextCursor: string | null;
 }
 
 export interface AdminOperations {
@@ -261,12 +294,27 @@ export interface CopilotChatResponse {
 }
 
 export interface CopilotReportSummary {
+  reportId?: string;
+  reportVersion?: number;
+  reportHash?: string;
+  publicationId?: string;
+  lessonKind?: "main" | "remedial" | "advanced";
+  reportKind?: "main_outcome" | "follow_up_outcome" | null;
+  sourceReportId?: string | null;
+  sourceReportVersion?: number | null;
+  sourceReportHash?: string | null;
+  parentPublicationId?: string | null;
+  canPlanFollowUp?: boolean;
+  canCreateNextMain?: boolean;
   lessonId: string;
   title: string;
   subject: string;
   topic: string;
   classNames: string;
   classIds: string[];
+  classId?: string;
+  completedStudents?: number;
+  totalStudents?: number;
   status: "PENDING" | "ANALYSING" | "REPORT_READY" | "FAILED";
   reportedAt: string | null;
   acknowledgedAt: string | null;
@@ -283,10 +331,12 @@ export interface CopilotReportDetail extends CopilotReportSummary {
     advanced_student_ids: string[];
     on_track_student_ids?: string[];
     not_finished_student_ids: string[];
+    not_assessed_student_ids?: string[];
     not_assessed_skill_ids?: string[];
     top_weak_skill_ids: string[];
     attention_reasons: Record<string, string[]>;
     student_skill_gaps?: Record<string, string[]>;
+    student_skill_gap_session_counts?: Record<string, Record<string, number>>;
     skill_metrics?: Record<string, {
       skill_id: string;
       assessed_student_count: number;
@@ -297,8 +347,56 @@ export interface CopilotReportDetail extends CopilotReportSummary {
       reasoning: number;
       transfer?: number | null;
     }>;
+    follow_up_skill_deltas?: Record<string, {
+      skill_id: string;
+      baseline_average?: number | null;
+      follow_up_average?: number | null;
+      delta?: number | null;
+    }>;
+    follow_up_student_outcomes?: Record<string, {
+      status: "recovered" | "developing" | "still_needs_support" | "extended" | "sustained" | "needs_consolidation" | "not_assessed";
+      assessed_skill_ids: string[];
+      baseline_gap_skill_ids: string[];
+    }>;
     student_names: Record<string, string>;
     score_scale: number;
+  };
+}
+
+export type TeacherReportAction =
+  | "continue_as_planned"
+  | "reteach_whole_class"
+  | "change_target_skill"
+  | "change_examples_or_exercises"
+  | "change_pacing"
+  | "group_students"
+  | "check_specific_students"
+  | "undecided"
+  | "other";
+
+export type TeacherReportEffect = "changed" | "confirmed" | "no_effect";
+export type TeacherReportApplication = "yes" | "partly" | "no";
+
+export interface TeacherReportDecision {
+  reportId: string;
+  reportVersion: number;
+  publicationId: string;
+  lessonId: string;
+  classId: string;
+  before: null | {
+    action: TeacherReportAction;
+    note: string | null;
+    recordedAt: string;
+  };
+  reportOpenedAt: string | null;
+  after: null | {
+    effect: TeacherReportEffect;
+    action: TeacherReportAction;
+    note: string | null;
+    evidenceUsed: string | null;
+    applied: TeacherReportApplication;
+    controlSpillover: boolean;
+    recordedAt: string;
   };
 }
 
@@ -387,6 +485,8 @@ export interface StudentRoadmapItem {
   title: string;
   status: "completed" | "active" | "locked";
   extra_exercises?: Array<{
+    publication_id: string;
+    problem_count?: number;
     group_type: string;
     summary: string;
     exercises: Array<{ problem_id?: number; question?: string }>;
@@ -453,6 +553,9 @@ export interface StudySession {
   current_problem_id?: number | null;
   current_progress?: number;
   current_process?: number;
+  session_completed?: boolean;
+  completed_problem_count?: number;
+  total_problem_count?: number;
   subject?: string;
   topic?: string;
   concept?: string;

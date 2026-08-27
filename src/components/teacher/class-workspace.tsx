@@ -22,11 +22,11 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { MathContent } from "@/components/shared/math-content";
 import { getApiErrorMessage, teacherApi } from "@/lib/api-client";
 import { skillDisplayName, skillLabelMap } from "@/lib/skill-labels";
-import type { ClassTab, CopilotReportDetail, CopilotReportSummary, TeacherRoadmapItem, TeacherSubmission } from "@/types/contracts";
+import type { ClassTab, CopilotReportDetail, CopilotReportSummary, TeacherReportAction, TeacherReportApplication, TeacherReportEffect, TeacherRoadmapItem, TeacherSubmission } from "@/types/contracts";
 
 export function ClassWorkspace({ classId }: { classId: string }) {
   const pathname = usePathname();
@@ -34,11 +34,55 @@ export function ClassWorkspace({ classId }: { classId: string }) {
   const search = useSearchParams();
   const [query, setQuery] = useState("");
   const [addStudentsOpen, setAddStudentsOpen] = useState(false);
+  const [detailWidth, setDetailWidth] = useState(() => {
+    if (typeof window === "undefined") return 560;
+    const stored = window.localStorage.getItem("teacher-class-detail-width");
+    const saved = stored === null ? 560 : Number(stored);
+    return clampDetailWidth(Number.isFinite(saved) ? saved : 560, window.innerWidth);
+  });
   const tab = normalizeTab(search.get("tab"));
   const selectedStudent = search.get("student");
   const selectedLesson = search.get("lesson");
   const selectedReport = search.get("report");
   const hasSelection = Boolean(selectedStudent || selectedLesson || selectedReport);
+
+  useEffect(() => {
+    const clamp = () => setDetailWidth((current) => clampDetailWidth(current, window.innerWidth));
+    window.addEventListener("resize", clamp);
+    return () => window.removeEventListener("resize", clamp);
+  }, []);
+
+  function startDetailResize(event: ReactPointerEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.userSelect = "none";
+    const move = (pointer: PointerEvent) => {
+      setDetailWidth(clampDetailWidth(window.innerWidth - pointer.clientX, window.innerWidth));
+    };
+    const stop = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", stop);
+      document.body.style.userSelect = previousUserSelect;
+      setDetailWidth((current) => {
+        window.localStorage.setItem("teacher-class-detail-width", String(current));
+        return current;
+      });
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", stop, { once: true });
+  }
+
+  function resizeDetailWithKeyboard(event: ReactKeyboardEvent<HTMLButtonElement>) {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const delta = event.key === "ArrowLeft" ? 32 : -32;
+    setDetailWidth((current) => {
+      const next = clampDetailWidth(current + delta, window.innerWidth);
+      window.localStorage.setItem("teacher-class-detail-width", String(next));
+      return next;
+    });
+  }
 
   const classesQuery = useQuery({ queryKey: ["teacher", "classes"], queryFn: teacherApi.classes });
   const studentsQuery = useQuery({ queryKey: ["teacher", "classes", classId, "students"], queryFn: () => teacherApi.students(classId) });
@@ -62,6 +106,15 @@ export function ClassWorkspace({ classId }: { classId: string }) {
       report.classIds?.includes(classId) || report.classNames.split(",").map((name) => name.trim()).includes(currentClass.class_name),
     );
   }, [reportsQuery.data, currentClass, classId]);
+  const selectedReportSummary = classReports.find(
+    (report) =>
+      selectedReport !== null && reportSelectionIds(report).includes(selectedReport),
+  );
+  const selectedReportLesson = roadmapQuery.data?.find(
+    (lesson) =>
+      lesson.id === selectedReportSummary?.publicationId ||
+      lesson.lessonId === selectedReportSummary?.lessonId,
+  );
 
   const filteredStudents = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase("vi");
@@ -86,7 +139,7 @@ export function ClassWorkspace({ classId }: { classId: string }) {
   }
 
   return (
-    <section className="class-workspace" data-detail-open={hasSelection}>
+    <section className="class-workspace" data-detail-open={hasSelection} style={{ "--detail-width": `${detailWidth}px` } as CSSProperties}>
       <div className="class-master">
         <header className="class-header">
           <div className="class-heading-copy">
@@ -119,9 +172,22 @@ export function ClassWorkspace({ classId }: { classId: string }) {
         </div>
       </div>
 
+      <button
+        className="class-detail-resizer"
+        role="separator"
+        aria-label="Đổi độ rộng panel chi tiết"
+        aria-orientation="vertical"
+        aria-valuemin={420}
+        aria-valuemax={Math.round(typeof window === "undefined" ? 960 : detailWidthLimits(window.innerWidth).max)}
+        aria-valuenow={Math.round(detailWidth)}
+        onKeyDown={resizeDetailWithKeyboard}
+        onPointerDown={startDetailResize}
+        title="Kéo hoặc dùng phím mũi tên để đổi độ rộng"
+      />
+
       <aside className="class-detail" aria-label="Chi tiết">
         {hasSelection && <button className="detail-back" onClick={clearSelection}><ArrowLeft size={17} /> Quay lại danh sách</button>}
-        {selectedStudent ? <StudentDetail classId={classId} studentId={selectedStudent} studentName={studentsQuery.data?.find((student) => student.student_id === selectedStudent)?.full_name || "Học sinh"} /> : selectedLesson ? <LessonDetail lesson={roadmapQuery.data?.find((lesson) => lesson.id === selectedLesson || lesson.lessonId === selectedLesson)} studentCount={currentClass.student_count} /> : selectedReport ? <ReportDetail lessonId={selectedReport} /> : <DetailEmpty tab={tab} />}
+        {selectedStudent ? <StudentDetail classId={classId} studentId={selectedStudent} studentName={studentsQuery.data?.find((student) => student.student_id === selectedStudent)?.full_name || "Học sinh"} /> : selectedLesson ? <LessonDetail lesson={roadmapQuery.data?.find((lesson) => lesson.id === selectedLesson || lesson.lessonId === selectedLesson)} studentCount={currentClass.student_count} /> : selectedReport ? <ReportDetail summary={selectedReportSummary} classId={classId} completedCount={selectedReportSummary?.completedStudents ?? selectedReportLesson?.completedCount ?? 0} studentCount={selectedReportSummary?.totalStudents ?? currentClass.student_count} /> : <DetailEmpty tab={tab} />}
       </aside>
 
       <AnimatePresence>{addStudentsOpen && <AddStudentsSheet classId={classId} onClose={() => setAddStudentsOpen(false)} />}</AnimatePresence>
@@ -149,7 +215,80 @@ function ReportList({ loading, error, reports, selected, onSelect }: { loading: 
   if (loading) return <ListSkeleton />;
   if (error) return <ListError error={error} />;
   if (!reports.length) return <ListEmpty icon={<ClipboardText size={26} />} title="Chưa có báo cáo" body="Báo cáo xuất hiện sau deadline khi lớp đã có dữ liệu làm bài." />;
-  return <div className="entity-list report-list">{reports.map((report) => <button key={report.lessonId} data-selected={selected === report.lessonId} onClick={() => onSelect(report.lessonId)}><span className="report-status" data-status={report.status}>{report.status === "REPORT_READY" ? <CheckCircle size={18} weight="fill" /> : report.status === "FAILED" ? <WarningCircle size={18} /> : <ClockCounterClockwise size={18} />}</span><span className="entity-main"><strong>{report.title}</strong><small>{report.subject} / {report.topic}</small></span><span className="entity-action">{report.status === "REPORT_READY" ? "Xem báo cáo" : statusLabel(report.status)}</span></button>)}</div>;
+  const followUpsBySource = new Map<string, CopilotReportSummary[]>();
+  for (const report of reports) {
+    if (!report.sourceReportId) continue;
+    const current = followUpsBySource.get(report.sourceReportId) || [];
+    current.push(report);
+    followUpsBySource.set(report.sourceReportId, current);
+  }
+  const mainReports = reports.filter(
+    (report) =>
+      report.reportKind !== "follow_up_outcome" &&
+      report.lessonKind !== "remedial" &&
+      report.lessonKind !== "advanced",
+  );
+  return (
+    <div className="entity-list report-list">
+      {mainReports.map((report) => {
+        const children = report.reportId
+          ? followUpsBySource.get(report.reportId) || []
+          : [];
+        const childPublications = new Map<string, CopilotReportSummary[]>();
+        for (const child of children) {
+          const publicationId = child.publicationId || child.lessonId;
+          const versions = childPublications.get(publicationId) || [];
+          versions.push(child);
+          childPublications.set(publicationId, versions);
+        }
+        return (
+          <div className="report-family" key={`${report.classId || report.classIds[0]}:${reportSelectionId(report)}`}>
+            <ReportRow report={report} selected={selected} onSelect={onSelect} />
+            {[...childPublications.entries()].map(([publicationId, versions]) => {
+              const sorted = [...versions].sort((left, right) => (right.reportVersion || 0) - (left.reportVersion || 0));
+              const lane = sorted[0];
+              return (
+                <section className="report-lane-family" key={publicationId} aria-label={`${lane.lessonKind === "remedial" ? "Phụ đạo" : "Nâng cao"} từ report v${lane.sourceReportVersion || report.reportVersion || 1}`}>
+                  <div className="report-lane-heading">
+                    <strong>{lane.lessonKind === "remedial" ? "Phụ đạo" : "Nâng cao"}</strong>
+                    <span>{lane.completedStudents || 0}/{lane.totalStudents || 0} hoàn thành · {statusLabel(lane.status)}</span>
+                  </div>
+                  {sorted.map((child) => (
+                    <ReportRow
+                      key={reportSelectionId(child)}
+                      report={child}
+                      selected={selected}
+                      onSelect={onSelect}
+                      nested
+                    />
+                  ))}
+                </section>
+              );
+            })}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function ReportRow({ report, selected, onSelect, nested = false }: { report: CopilotReportSummary; selected: string | null; onSelect: (id: string) => void; nested?: boolean }) {
+  const id = reportSelectionId(report);
+  const kindLabel = report.lessonKind === "remedial" ? "Kết quả phụ đạo" : report.lessonKind === "advanced" ? "Kết quả nâng cao" : "Báo cáo lớp";
+  const version = report.reportVersion ? `v${report.reportVersion}` : "Chưa có version";
+  const completion = `${report.completedStudents || 0}/${report.totalStudents || 0} hoàn thành`;
+  const source = nested && report.sourceReportVersion ? `từ report v${report.sourceReportVersion}` : "";
+  return <button className={nested ? "report-row-nested" : ""} data-selected={selected !== null && reportSelectionIds(report).includes(selected)} onClick={() => onSelect(id)}><span className="report-status" data-status={report.status}>{report.status === "REPORT_READY" ? <CheckCircle size={18} weight="fill" /> : report.status === "FAILED" ? <WarningCircle size={18} /> : <ClockCounterClockwise size={18} />}</span><span className="entity-main"><small>{kindLabel} · {version}{source ? ` · ${source}` : ""}</small><strong>{report.title}</strong><small>{completion} · {statusLabel(report.status)} · publish {formatDate(report.publishedAt)}</small></span><span className="entity-action">{report.status === "REPORT_READY" ? "Xem báo cáo" : statusLabel(report.status)}</span></button>;
+}
+
+function reportSelectionId(report: CopilotReportSummary) {
+  return report.reportId || report.publicationId || report.lessonId;
+}
+
+function reportSelectionIds(report: CopilotReportSummary) {
+  return [report.publicationId, report.reportId, report.lessonId].filter(
+    (value): value is string => Boolean(value),
+  );
 }
 
 function StudentDetail({ classId, studentId, studentName }: { classId: string; studentId: string; studentName: string }) {
@@ -236,18 +375,130 @@ function extractMarkdownSection(value: string, heading: string) {
   return (nextHeading >= 0 ? afterHeading.slice(0, nextHeading) : afterHeading).trim();
 }
 
-function ReportDetail({ lessonId }: { lessonId: string }) {
-  const report = useQuery({ queryKey: ["teacher", "copilot", lessonId, "report"], queryFn: () => teacherApi.report(lessonId), refetchInterval: (query) => ["PENDING", "ANALYSING"].includes(query.state.data?.status || "") ? 8_000 : false });
+const teacherReportActionOptions: Array<{ value: TeacherReportAction; label: string }> = [
+  { value: "continue_as_planned", label: "Dạy tiếp như kế hoạch" },
+  { value: "reteach_whole_class", label: "Dạy lại cho cả lớp" },
+  { value: "change_target_skill", label: "Đổi kỹ năng trọng tâm" },
+  { value: "change_examples_or_exercises", label: "Đổi ví dụ hoặc bài tập" },
+  { value: "change_pacing", label: "Đổi nhịp độ tiết học" },
+  { value: "group_students", label: "Chia nhóm học sinh" },
+  { value: "check_specific_students", label: "Kiểm tra một số học sinh" },
+  { value: "undecided", label: "Chưa quyết định" },
+  { value: "other", label: "Khác" },
+];
+
+function ReportDetail(props: { summary?: CopilotReportSummary; classId: string; completedCount: number; studentCount: number }) {
+  return <ReportDetailInner key={props.summary?.reportId || "missing-report"} {...props} />;
+}
+
+function ReportDetailInner({ summary, classId, completedCount, studentCount }: { summary?: CopilotReportSummary; classId: string; completedCount: number; studentCount: number }) {
+  const queryClient = useQueryClient();
+  const reportId = summary?.reportId || "";
+  const requiresDecision = Boolean(reportId && summary?.status === "REPORT_READY" && summary.reportKind !== "follow_up_outcome");
+  const [beforeAction, setBeforeAction] = useState<TeacherReportAction | "">("");
+  const [beforeNote, setBeforeNote] = useState<string | null>(null);
+  const [afterEffect, setAfterEffect] = useState<TeacherReportEffect | "">("");
+  const [afterAction, setAfterAction] = useState<TeacherReportAction | "">("");
+  const [afterApplied, setAfterApplied] = useState<TeacherReportApplication | "">("");
+  const [afterEvidence, setAfterEvidence] = useState("");
+  const [afterNote, setAfterNote] = useState("");
+  const [controlSpillover, setControlSpillover] = useState(false);
+
+  const decision = useQuery({
+    queryKey: ["teacher", "copilot", reportId, "decision"],
+    queryFn: () => teacherApi.reportDecision(reportId),
+    enabled: requiresDecision,
+  });
+  const selectedBeforeAction = beforeAction || decision.data?.before?.action || "";
+  const selectedBeforeNote = beforeNote ?? decision.data?.before?.note ?? "";
+
+  const report = useQuery({
+    queryKey: ["teacher", "copilot", reportId, "report"],
+    queryFn: () => teacherApi.report(reportId),
+    enabled: Boolean(reportId && (!requiresDecision || decision.data?.reportOpenedAt)),
+  });
+  const revealReport = useMutation({
+    mutationFn: async () => {
+      if (!selectedBeforeAction) throw new Error("Chọn kế hoạch dự kiến trước khi mở báo cáo.");
+      await teacherApi.recordReportDecisionBefore(reportId, {
+        action: selectedBeforeAction,
+        ...(selectedBeforeNote.trim() ? { note: selectedBeforeNote.trim() } : {}),
+      });
+      return teacherApi.openReport(reportId);
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData(["teacher", "copilot", reportId, "decision"], data);
+      void queryClient.invalidateQueries({ queryKey: ["teacher", "copilot", reportId, "report"] });
+    },
+  });
+  const saveAfterDecision = useMutation({
+    mutationFn: () => {
+      if (!afterEffect || !afterAction || !afterApplied) throw new Error("Điền đủ ba lựa chọn bắt buộc.");
+      return teacherApi.recordReportDecisionAfter(reportId, {
+        effect: afterEffect,
+        action: afterAction,
+        applied: afterApplied,
+        controlSpillover,
+        ...(afterEvidence.trim() ? { evidenceUsed: afterEvidence.trim() } : {}),
+        ...(afterNote.trim() ? { note: afterNote.trim() } : {}),
+      });
+    },
+    onSuccess: (data) => queryClient.setQueryData(["teacher", "copilot", reportId, "decision"], data),
+  });
   const skillLabels = useQuery({ queryKey: ["curriculum", "skills", report.data?.subject, report.data?.topic, report.data?.concept], queryFn: () => teacherApi.curriculumSkills(report.data?.subject || "", report.data?.topic || "", report.data?.concept || ""), enabled: Boolean(report.data?.subject && report.data?.topic && report.data?.concept), staleTime: Infinity });
+  const runReport = useMutation({
+    mutationFn: async () => {
+      if (!summary?.publicationId) throw new Error("Báo cáo chưa gắn với publication.");
+      return teacherApi.runClassReport(summary.publicationId, classId);
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["teacher", "copilot", "reports"] });
+    },
+  });
+
+  if (!summary) return <div className="detail-content"><ListEmpty icon={<WarningCircle size={25} />} title="Không tìm thấy bài học" body="Danh sách báo cáo vừa thay đổi. Hãy chọn lại bài học." /></div>;
+  const cannotRun = completedCount === 0 || summary.status === "ANALYSING" || runReport.isPending || !summary.publicationId;
+  const runLabel = summary.status === "REPORT_READY" ? "Tạo phiên bản báo cáo mới" : summary.status === "FAILED" ? "Chạy lại báo cáo" : "Chạy báo cáo";
+  const runAction = <div className="report-manual-run"><p>{completedCount}/{studentCount} học sinh đã hoàn thành.</p><button className="secondary-button" disabled={cannotRun} onClick={() => runReport.mutate()}><Sparkle size={16} weight="fill" />{runReport.isPending ? "Đang gửi yêu cầu" : summary.status === "ANALYSING" ? "Đang phân tích" : runLabel}</button>{completedCount === 0 ? <small>Cần ít nhất một học sinh hoàn thành trước khi chạy báo cáo.</small> : null}{runReport.isError ? <small className="student-form-error">{getApiErrorMessage(runReport.error, "Không thể chạy báo cáo.")}</small> : null}</div>;
+
+  if (summary.status !== "REPORT_READY") return <div className="detail-content"><p className="workspace-kicker">Báo cáo bài học</p><h2>{summary.title}</h2><div className="report-processing"><ClockCounterClockwise size={28} /><h3>{statusLabel(summary.status)}</h3><p>{summary.status === "ANALYSING" ? "Copilot đang tạo một immutable report version cho lớp này." : "Bạn có thể chạy báo cáo từ dữ liệu hiện có mà không cần chờ deadline."}</p></div>{runAction}</div>;
+  if (requiresDecision && decision.isLoading) return <div className="detail-content"><ListSkeleton /></div>;
+  if (requiresDecision && decision.isError) return <div className="detail-content"><ListError error={decision.error} /></div>;
+  if (requiresDecision && !decision.data?.reportOpenedAt) {
+    return <div className="detail-content report-decision-gate"><p className="workspace-kicker">Trước khi xem báo cáo</p><h2>{summary.title}</h2><p className="detail-lead">Nếu chưa xem phân tích của D-Friend, cô dự định làm gì ở tiết học sắp tới?</p><form className="report-decision-form" onSubmit={(event) => { event.preventDefault(); revealReport.mutate(); }}><div className="form-field"><label htmlFor={`before-action-${reportId}`}>Kế hoạch dự kiến</label><select id={`before-action-${reportId}`} className="input" value={selectedBeforeAction} onChange={(event) => setBeforeAction(event.target.value as TeacherReportAction)} required><option value="" disabled>Chọn một phương án</option>{teacherReportActionOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></div><div className="form-field"><label htmlFor={`before-note-${reportId}`}>Ghi chú ngắn <span>(không bắt buộc)</span></label><textarea id={`before-note-${reportId}`} className="textarea" maxLength={500} value={selectedBeforeNote} onChange={(event) => setBeforeNote(event.target.value)} placeholder="Ví dụ: tiếp tục luyện biến đổi căn thức" /></div><button className="primary-button" disabled={!selectedBeforeAction || revealReport.isPending}>{revealReport.isPending ? "Đang lưu" : "Lưu và mở báo cáo"}</button>{revealReport.isError ? <p className="student-form-error">{getApiErrorMessage(revealReport.error, "Không thể mở báo cáo.")}</p> : null}</form><p className="report-decision-privacy">Câu trả lời này chỉ dùng để đo xem báo cáo có làm thay đổi quyết định dạy hay không.</p></div>;
+  }
   if (report.isLoading) return <div className="detail-content"><ListSkeleton /></div>;
   if (report.isError) return <div className="detail-content"><ListError error={report.error} /></div>;
   const data = report.data;
-  if (!data) return null;
-  if (data.status !== "REPORT_READY") return <div className="detail-content"><p className="workspace-kicker">Báo cáo bài học</p><h2>{data.title}</h2><div className="report-processing"><ClockCounterClockwise size={28} /><h3>{statusLabel(data.status)}</h3><p>Copilot sẽ cập nhật trang này khi phân tích hoàn tất.</p></div></div>;
-  if (!data.report) return <div className="detail-content"><p className="workspace-kicker">Báo cáo bài học</p><h2>{data.title}</h2><ListEmpty icon={<WarningCircle size={25} />} title="Báo cáo chưa có nội dung" body="Trạng thái đã hoàn tất nhưng dữ liệu phân tích đang trống. Thử tải lại sau." /></div>;
+  if (!data?.report) return <div className="detail-content"><p className="workspace-kicker">Báo cáo bài học</p><h2>{summary.title}</h2><ListEmpty icon={<WarningCircle size={25} />} title="Báo cáo chưa có nội dung" body="Trạng thái đã hoàn tất nhưng dữ liệu phân tích đang trống. Thử tải lại sau." />{runAction}</div>;
   const skill = data.report;
   const labels = skillLabelMap(skillLabels.data);
-  return <div className="detail-content report-detail"><p className="workspace-kicker">Báo cáo bài học</p><h2>{data.title}</h2><p className="detail-lead">Phân tích từ {data.totalStudents} học sinh, thang điểm {skill.score_scale}.</p><SkillPerformanceTable metrics={skill.skill_metrics} labels={labels} /><section className="detail-section"><h3>Kỹ năng lớp làm tốt</h3><SkillChips items={skill.strengths} labels={labels} empty="Chưa có kỹ năng nổi bật." /></section><section className="detail-section"><h3>Cần củng cố</h3><SkillChips items={skill.top_weak_skill_ids.length ? skill.top_weak_skill_ids : skill.gaps} labels={labels} empty="Không có khoảng trống kỹ năng đáng kể." warning /></section>{skill.not_assessed_skill_ids?.length ? <section className="detail-section"><h3>Chưa được đánh giá</h3><SkillChips items={skill.not_assessed_skill_ids} labels={labels} empty="" /></section> : null}<GroupList title="Cần phụ đạo" ids={skill.remedial_student_ids} names={skill.student_names} /><GroupList title="Đang theo kịp" ids={skill.on_track_student_ids || []} names={skill.student_names} /><GroupList title="Có thể nâng cao" ids={skill.advanced_student_ids} names={skill.student_names} /><GroupList title="Chưa hoàn thành" ids={skill.not_finished_student_ids} names={skill.student_names} /><section className="report-actions"><Link className="primary-button" href={`/teacher/lessons/new?fromReport=${lessonId}`}><Sparkle size={16} weight="fill" /> Tạo bài tiếp theo</Link>{(skill.remedial_student_ids.length > 0 || skill.advanced_student_ids.length > 0) && <Link className="secondary-button" href={`/teacher/copilot/${lessonId}/extra`}>Tạo bài theo nhóm</Link>}</section></div>;
+  const followUpReport = data.reportKind === "follow_up_outcome";
+  const afterCapture = requiresDecision ? decision.data?.after ? <section className="report-decision-complete"><CheckCircle size={20} weight="fill" /><div><strong>Đã ghi nhận tác động sau tiết học</strong><p>{teacherEffectLabel(decision.data.after.effect)} · {teacherActionLabel(decision.data.after.action)} · áp dụng {teacherApplicationLabel(decision.data.after.applied)}</p></div></section> : <section className="report-after-capture"><p className="workspace-kicker">Sau tiết học</p><h3>Báo cáo này đã tác động thế nào?</h3><p>Điền sau khi dạy xong. Khoảng một phút.</p><form className="report-decision-form" onSubmit={(event) => { event.preventDefault(); saveAfterDecision.mutate(); }}><div className="report-decision-grid"><div className="form-field"><label htmlFor={`after-effect-${reportId}`}>So với kế hoạch ban đầu</label><select id={`after-effect-${reportId}`} className="input" value={afterEffect} onChange={(event) => setAfterEffect(event.target.value as TeacherReportEffect)} required><option value="" disabled>Chọn tác động</option><option value="changed">Đã thay đổi kế hoạch</option><option value="confirmed">Củng cố quyết định cũ</option><option value="no_effect">Không có tác động</option></select></div><div className="form-field"><label htmlFor={`after-action-${reportId}`}>Hành động cuối cùng</label><select id={`after-action-${reportId}`} className="input" value={afterAction} onChange={(event) => setAfterAction(event.target.value as TeacherReportAction)} required><option value="" disabled>Chọn hành động</option>{teacherReportActionOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></div><div className="form-field"><label htmlFor={`after-applied-${reportId}`}>Đã áp dụng trong lớp?</label><select id={`after-applied-${reportId}`} className="input" value={afterApplied} onChange={(event) => setAfterApplied(event.target.value as TeacherReportApplication)} required><option value="" disabled>Chọn mức độ</option><option value="yes">Có</option><option value="partly">Một phần</option><option value="no">Không</option></select></div></div><div className="form-field"><label htmlFor={`after-evidence-${reportId}`}>Chi tiết nào trong report có ích? <span>(không bắt buộc)</span></label><textarea id={`after-evidence-${reportId}`} className="textarea" maxLength={1000} value={afterEvidence} onChange={(event) => setAfterEvidence(event.target.value)} /></div><div className="form-field"><label htmlFor={`after-note-${reportId}`}>Ghi chú sau tiết học <span>(không bắt buộc)</span></label><textarea id={`after-note-${reportId}`} className="textarea" maxLength={500} value={afterNote} onChange={(event) => setAfterNote(event.target.value)} /></div><label className="report-spillover-check"><input type="checkbox" checked={controlSpillover} onChange={(event) => setControlSpillover(event.target.checked)} /><span>Tôi đã dùng insight từ report này khi dạy lớp đối chứng.</span></label><button className="secondary-button" disabled={!afterEffect || !afterAction || !afterApplied || saveAfterDecision.isPending}>{saveAfterDecision.isPending ? "Đang lưu" : "Lưu phản hồi sau tiết học"}</button>{saveAfterDecision.isError ? <p className="student-form-error">{getApiErrorMessage(saveAfterDecision.error, "Không thể lưu phản hồi.")}</p> : null}</form></section> : null;
+  return <div className="detail-content report-detail"><p className="workspace-kicker">{followUpReport ? data.lessonKind === "remedial" ? "Kết quả phụ đạo" : "Kết quả nâng cao" : "Báo cáo bài học"}</p><h2>{data.title}</h2><p className="detail-lead">Phiên bản {data.reportVersion || 1}, phân tích từ {data.totalStudents} học sinh, thang điểm {skill.score_scale}.</p><SkillPerformanceTable metrics={skill.skill_metrics} labels={labels} />{followUpReport ? <FollowUpOutcomes outcomes={skill.follow_up_student_outcomes} deltas={skill.follow_up_skill_deltas} names={skill.student_names} labels={labels} /> : <><section className="detail-section"><h3>Kỹ năng lớp làm tốt</h3><SkillChips items={skill.strengths} labels={labels} empty="Chưa có kỹ năng nổi bật." /></section><section className="detail-section"><h3>Cần củng cố</h3><SkillChips items={skill.top_weak_skill_ids.length ? skill.top_weak_skill_ids : skill.gaps} labels={labels} empty="Không có khoảng trống kỹ năng đáng kể." warning /></section>{skill.not_assessed_skill_ids?.length ? <section className="detail-section"><h3>Chưa được đánh giá</h3><SkillChips items={skill.not_assessed_skill_ids} labels={labels} empty="" /></section> : null}<GroupList title="Cần phụ đạo" ids={skill.remedial_student_ids} names={skill.student_names} /><GroupList title="Đang theo kịp" ids={skill.on_track_student_ids || []} names={skill.student_names} /><GroupList title="Có thể nâng cao" ids={skill.advanced_student_ids} names={skill.student_names} /></>}<GroupList title="Chưa hoàn thành" ids={skill.not_finished_student_ids} names={skill.student_names} />{skill.not_assessed_student_ids?.length ? <GroupList title="Đã hoàn thành nhưng chưa có evidence" ids={skill.not_assessed_student_ids} names={skill.student_names} /> : null}{afterCapture}{runAction}<section className="report-actions">{data.canPlanFollowUp && <Link className="primary-button" href={`/teacher/copilot/${reportId}/extra`}><Sparkle size={16} weight="fill" /> Tạo bài follow-up</Link>}<Link className="secondary-button" href={`/teacher/lessons/new?fromReport=${reportId}`}>Tạo bài tiếp theo</Link></section></div>;
+}
+
+function teacherActionLabel(value: TeacherReportAction) {
+  return teacherReportActionOptions.find((option) => option.value === value)?.label || value;
+}
+
+function teacherEffectLabel(value: TeacherReportEffect) {
+  return value === "changed" ? "Đã thay đổi kế hoạch" : value === "confirmed" ? "Củng cố quyết định cũ" : "Không có tác động";
+}
+
+function teacherApplicationLabel(value: TeacherReportApplication) {
+  return value === "yes" ? "đầy đủ" : value === "partly" ? "một phần" : "không áp dụng";
+}
+
+function FollowUpOutcomes({ outcomes, deltas, names, labels }: { outcomes?: NonNullable<CopilotReportDetail["report"]>["follow_up_student_outcomes"]; deltas?: NonNullable<CopilotReportDetail["report"]>["follow_up_skill_deltas"]; names: Record<string, string>; labels: Record<string, string> }) {
+  const outcomeRows = Object.entries(outcomes || {});
+  const deltaRows = Object.values(deltas || {});
+  return <><section className="detail-section"><h3>Kết quả từng học sinh</h3>{outcomeRows.length ? <div className="follow-up-outcome-list">{outcomeRows.map(([studentId, outcome]) => <div key={studentId}><span><strong>{names[studentId] || studentId}</strong><small>{outcome.assessed_skill_ids.map((skill) => skillDisplayName(skill, labels)).join(", ") || "Chưa đủ evidence"}</small></span><b>{followUpOutcomeLabel(outcome.status)}</b></div>)}</div> : <p className="muted-copy">Chưa có outcome học sinh.</p>}</section>{deltaRows.length ? <section className="detail-section"><h3>Thay đổi so với report nguồn</h3><div className="follow-up-delta-list">{deltaRows.map((delta) => <div key={delta.skill_id}><span>{skillDisplayName(delta.skill_id, labels)}</span><strong>{delta.delta == null ? "Chưa đủ dữ liệu" : `${delta.delta >= 0 ? "+" : ""}${delta.delta.toFixed(1)}`}</strong></div>)}</div></section> : null}</>;
+}
+
+function followUpOutcomeLabel(value: string) {
+  const labels: Record<string, string> = { recovered: "Đã phục hồi", developing: "Đang tiến bộ", still_needs_support: "Còn cần hỗ trợ", extended: "Đã mở rộng", sustained: "Duy trì tốt", needs_consolidation: "Cần củng cố", not_assessed: "Chưa đánh giá" };
+  return labels[value] || value;
 }
 
 type SkillMetric = NonNullable<NonNullable<CopilotReportDetail["report"]>["skill_metrics"]>[string];
@@ -282,6 +533,8 @@ function ListError({ error }: { error: unknown }) { return <div className="list-
 function ListEmpty({ icon, title, body, action }: { icon: React.ReactNode; title: string; body: string; action?: React.ReactNode }) { return <div className="list-empty">{icon}<h3>{title}</h3><p>{body}</p>{action}</div>; }
 function ClassSkeleton() { return <section className="class-workspace" data-detail-open="false"><div className="class-master p-6"><div className="skeleton h-32" /><div className="skeleton h-12 mt-4" /><ListSkeleton /></div><aside className="class-detail" aria-label="Chi tiết"><ListSkeleton /></aside></section>; }
 function normalizeTab(value: string | null): ClassTab { return value === "learning-path" || value === "reports" ? value : "students"; }
+function detailWidthLimits(viewportWidth: number) { return { min: 420, max: Math.max(420, Math.min(viewportWidth * 0.75, viewportWidth - 320)) }; }
+function clampDetailWidth(value: number, viewportWidth: number) { const limits = detailWidthLimits(viewportWidth); return Math.min(Math.max(value, limits.min), limits.max); }
 function normalizeScore10(value: number | null | undefined) { const numeric = Number(value || 0); return numeric > 10 && numeric <= 100 ? numeric / 10 : numeric; }
 function formatPercent(value: number) { return `${Math.round(value * 100)}%`; }
 function initials(value: string) { return value.split(/\s+/).slice(-2).map((part) => part[0]).join("").toUpperCase(); }

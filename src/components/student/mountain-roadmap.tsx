@@ -40,7 +40,7 @@ export function MountainRoadmap({ initialClassId = "" }: { initialClassId?: stri
             return (
               <motion.div key={item.id} className="trail-stage" data-status={item.status} data-side={index % 2 ? "right" : "left"} initial={reduceMotion ? false : { opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.05 }}>
                 {completed || active ? <Link href={`/student/lesson/${item.id}/part1`}>{content}</Link> : <div aria-disabled="true">{content}</div>}
-                {item.extra_exercises?.length ? <Link className="trail-branch" href={item.extra_completed ? `/student/report/extra_${item.lessonId}` : `/student/lesson/extra_${item.lessonId}/part2`}><Flag size={16} /> {item.extra_completed ? "Feedback luyện thêm" : "Luyện thêm"}</Link> : null}
+                {item.extra_exercises?.length ? <Link className="trail-branch" href={item.extra_completed ? `/student/report/${item.extra_exercises[0].publication_id || `extra_${item.lessonId}`}` : `/student/lesson/${item.extra_exercises[0].publication_id || `extra_${item.lessonId}`}/part1`}><Flag size={16} /> {item.extra_completed ? "Feedback luyện thêm" : "Luyện thêm"}</Link> : null}
               </motion.div>
             );
           })}
@@ -67,4 +67,4 @@ export function ProfileWorkspace() {
 }
 
 function Score({ label, value }: { label: string; value: number }) { const score = value > 10 ? value / 10 : value; return <div><span>{label}</span><strong>{Number.isInteger(score) ? score : score.toFixed(1)}</strong><small>/10</small></div>; }
-function roadmapLessonId(item: { id: string; lessonId?: string; lesson_id?: string }) { return item.lessonId || item.lesson_id || item.id; }
+function roadmapLessonId(item: { id: string }) { return item.id; }

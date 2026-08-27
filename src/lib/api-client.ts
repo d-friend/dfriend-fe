@@ -11,8 +11,13 @@ import type {
   CopilotChatResponse,
   CopilotReportDetail,
   CopilotReportSummary,
+  TeacherReportAction,
+  TeacherReportApplication,
+  TeacherReportDecision,
+  TeacherReportEffect,
   CurriculumSubject,
   ExerciseDocument,
+  ProductEventPage,
   StudentInClass,
   TeacherClass,
   TeacherInvite,
@@ -71,10 +76,93 @@ export function isApiErrorStatus(error: unknown, status: number) {
   return axios.isAxiosError(error) && error.response?.status === status;
 }
 
+export interface FollowUpSuggestion {
+  kind: "main" | "remedial" | "advanced";
+  concept_key: string;
+  target_student_ids?: string[] | null;
+  target_skill_ids: string[];
+  reason: string;
+  empty_reason?: string | null;
+  originating_skill_ids?: string[];
+  prerequisite_routes?: Record<string, string>;
+}
+
+export interface FollowUpPlan {
+  class_id: string;
+  lesson_id: string;
+  source_concept_key: string;
+  main: FollowUpSuggestion;
+  groups: FollowUpSuggestion[];
+  generated_at: string;
+  planId?: string;
+  reportId?: string;
+  reportVersion?: number;
+  reportHash?: string;
+  parentLessonTitle?: string;
+  laneDrafts?: Partial<Record<"remedial" | "advanced", FollowUpDraftHandle>>;
+  laneJobs?: Partial<Record<"remedial" | "advanced", string>>;
+  studentNames?: Record<string, string>;
+}
+
+export interface FollowUpDraftHandle {
+  id: string;
+  groupType: "remedial" | "advanced";
+  studentIds: string[];
+  exercises: Array<Record<string, unknown>>;
+  summary: string;
+  aiLessonId: string;
+  publicationId?: string;
+  classId?: string;
+  sourceReportId?: string;
+  sourceReportVersion?: number;
+  published?: boolean;
+}
+
+export interface FollowUpDraftResult {
+  created: boolean;
+  reused?: boolean;
+  queued?: boolean;
+  jobId?: string;
+  requestId?: string;
+  generationRunId?: string;
+  kind?: "remedial" | "advanced";
+  draft?: FollowUpDraftHandle;
+}
+
+export interface CompletePoolResult {
+  draft: Record<string, unknown>;
+  completed_slot_ids: string[];
+  failed_slots: Array<{
+    slot_id: string;
+    role: string;
+    reason: string;
+  }>;
+}
+
 export const adminApi = {
   me: async () => (await apiClient.get<AuthUser>("/auth/me")).data,
   overview: async () => (await apiClient.get<AdminOverview>("/admin/overview")).data,
   operations: async () => (await apiClient.get<AdminOperations>("/admin/operations")).data,
+  productEvents: async (params?: {
+    limit?: number;
+    cursor?: string | null;
+    eventType?: string;
+    actorUserId?: string;
+    classId?: string;
+    lessonId?: string;
+  }) =>
+    (
+      await apiClient.get<ProductEventPage>("/admin/product-events", {
+        params: {
+          ...(params?.limit ? { limit: params.limit } : {}),
+          ...(params?.cursor ? { cursor: params.cursor } : {}),
+          ...(params?.eventType ? { eventType: params.eventType } : {}),
+          ...(params?.actorUserId ? { actorUserId: params.actorUserId } : {}),
+          ...(params?.classId ? { classId: params.classId } : {}),
+          ...(params?.lessonId ? { lessonId: params.lessonId } : {}),
+        },
+      })
+    ).data,
   users: async (params?: { query?: string; role?: AdminUser["role"] | "" }) => {
     const requestParams = {
       ...(params?.query ? { query: params.query } : {}),
@@ -162,10 +250,61 @@ export const teacherApi = {
     (await apiClient.get<CopilotReportSummary[]>("/teacher/copilot/reports")).data,
   dismissCopilotReport: async (lessonId: string) =>
     apiClient.post(`/teacher/copilot/${lessonId}/dismiss`),
-  report: async (lessonId: string) =>
+  report: async (reportId: string) =>
     (
       await apiClient.get<CopilotReportDetail>(
-        `/teacher/copilot/${lessonId}/report`,
+        `/teacher/copilot/reports/${reportId}`,
+      )
+    ).data,
+  reportDecision: async (reportId: string) =>
+    (
+      await apiClient.get<TeacherReportDecision>(
+        `/teacher/copilot/reports/${reportId}/decision`,
+      )
+    ).data,
+  recordReportDecisionBefore: async (
+    reportId: string,
+    payload: { action: TeacherReportAction; note?: string },
+  ) =>
+    (
+      await apiClient.put<TeacherReportDecision>(
+        `/teacher/copilot/reports/${reportId}/decision/before`,
+        payload,
+      )
+    ).data,
+  openReport: async (reportId: string) =>
+    (
+      await apiClient.post<TeacherReportDecision>(
+        `/teacher/copilot/reports/${reportId}/open`,
+      )
+    ).data,
+  recordReportDecisionAfter: async (
+    reportId: string,
+    payload: {
+      effect: TeacherReportEffect;
+      action: TeacherReportAction;
+      note?: string;
+      evidenceUsed?: string;
+      applied: TeacherReportApplication;
+      controlSpillover: boolean;
+    },
+  ) =>
+    (
+      await apiClient.put<TeacherReportDecision>(
+        `/teacher/copilot/reports/${reportId}/decision/after`,
+        payload,
+      )
+    ).data,
+  runClassReport: async (publicationId: string, classId: string) =>
+    (
+      await apiClient.post<{
+        status: "ANALYSING";
+        publicationId: string;
+        classId: string;
+        completedStudents: number;
+        totalStudents: number;
+      }>(
+        `/teacher/copilot/reports/${publicationId}/classes/${classId}/run`,
       )
     ).data,
   conversations: async () =>
@@ -191,7 +330,7 @@ export const teacherApi = {
       })
     ).data,
   confirmCopilotPlan: async (
-    payload: { classId: string; goalText: string; conceptKey: string; skillIds: string[]; allowGenerated?: boolean },
+    payload: { classId: string; goalText: string; conceptKey: string; skillIds: string[]; allowGenerated?: boolean; requestId?: string },
   ) =>
     (
       await apiClient.post<{ jobId: string; generationRunId: string; status: "queued" }>(
@@ -252,7 +391,7 @@ export const teacherApi = {
       await apiClient.post<Record<string, unknown>>(
         "/exercises/create-lesson/lesson1",
         body,
-        { timeout: 360_000 },
+        { timeout: 30_000 },
       )
     ).data,
   lessonGenerationJob: async (jobId: string) =>
@@ -291,46 +430,50 @@ export const teacherApi = {
         `/teacher/copilot/drafts/${lessonId}`,
       )
     ).data,
-  approveGenerated: async (lessonId: string) =>
+  approveGenerated: async (lessonId: string, expectedRevision: number) =>
     (
       await apiClient.post<Record<string, unknown>>(
         `/exercises/ai-drafts/${lessonId}/approve-generated`,
+        { expectedRevision },
       )
     ).data,
-  approveLessonReview: async (lessonId: string) =>
+  approveLessonReview: async (lessonId: string, expectedRevision: number) =>
     (
       await apiClient.post<Record<string, unknown>>(
         `/exercises/ai-drafts/${lessonId}/review/approve`,
+        { expectedRevision },
       )
     ).data,
-  reopenLessonReview: async (lessonId: string) =>
+  reopenLessonReview: async (lessonId: string, expectedRevision: number) =>
     (
       await apiClient.post<Record<string, unknown>>(
         `/exercises/ai-drafts/${lessonId}/review/reopen`,
+        { expectedRevision },
       )
     ).data,
-  completeLessonReviewPool: async (lessonId: string) =>
+  completeLessonReviewPool: async (lessonId: string, expectedRevision: number) =>
     (
-      await apiClient.post<Record<string, unknown>>(
+      await apiClient.post<CompletePoolResult>(
         `/exercises/ai-drafts/${lessonId}/review/complete-pool`,
-        undefined,
+        { expectedRevision },
         { timeout: 360_000 },
       )
     ).data,
   regenerateLessonReview: async (
     lessonId: string,
     targets: Array<{ kind: "mastery" | "knowledge_checkpoint"; id?: string; index?: number }>,
+    expectedRevision: number,
   ) =>
     (
       await apiClient.post<Record<string, unknown>>(
         `/exercises/ai-drafts/${lessonId}/review/regenerate`,
-        { targets },
+        { targets, expectedRevision },
         { timeout: 360_000 },
       )
     ).data,
   publishCopilotDraft: async (
     lessonId: string,
-    payload: { classIds: string[]; deadline?: string; title?: string },
+    payload: { classIds: string[]; deadline?: string; title?: string; expectedRevision: number },
   ) =>
     (
       await apiClient.post<Record<string, unknown>>(
@@ -338,10 +481,11 @@ export const teacherApi = {
         payload,
       )
     ).data,
-  publishFollowUpDraft: async (aiLessonId: string) =>
+  publishFollowUpDraft: async (aiLessonId: string, expectedRevision: number) =>
     (
       await apiClient.post<Record<string, unknown>>(
         `/teacher/copilot/extra-exercises/${aiLessonId}/publish`,
+        { expectedRevision },
       )
     ).data,
   generateFollowUps: async (lessonId: string) =>
@@ -362,5 +506,28 @@ export const teacherApi = {
       }>(`/teacher/copilot/${lessonId}/extra-exercises`, undefined, {
         timeout: 360_000,
       })
+    ).data,
+  followUpPlan: async (reportId: string) =>
+    (await apiClient.get<FollowUpPlan>(`/teacher/copilot/reports/${reportId}/follow-up-plan`)).data,
+  createFollowUpDraft: async (
+    lessonId: string,
+    payload: {
+      reportId: string;
+      planId: string;
+      kind: "remedial" | "advanced";
+      conceptKey: string;
+      studentIds: string[];
+      skillIds: string[];
+      lessonGoal?: string;
+      editedRecommendation?: boolean;
+      requestId?: string;
+    },
+  ) =>
+    (
+      await apiClient.post<FollowUpDraftResult>(
+        `/teacher/copilot/${lessonId}/follow-up-drafts`,
+        payload,
+        { timeout: 360_000 },
+      )
     ).data,
 };
