@@ -11,6 +11,10 @@ import type {
   CopilotChatResponse,
   CopilotReportDetail,
   CopilotReportSummary,
+  TeacherReportAction,
+  TeacherReportApplication,
+  TeacherReportDecision,
+  TeacherReportEffect,
   CurriculumSubject,
   ExerciseDocument,
   ProductEventPage,
@@ -250,6 +254,45 @@ export const teacherApi = {
     (
       await apiClient.get<CopilotReportDetail>(
         `/teacher/copilot/reports/${reportId}`,
+      )
+    ).data,
+  reportDecision: async (reportId: string) =>
+    (
+      await apiClient.get<TeacherReportDecision>(
+        `/teacher/copilot/reports/${reportId}/decision`,
+      )
+    ).data,
+  recordReportDecisionBefore: async (
+    reportId: string,
+    payload: { action: TeacherReportAction; note?: string },
+  ) =>
+    (
+      await apiClient.put<TeacherReportDecision>(
+        `/teacher/copilot/reports/${reportId}/decision/before`,
+        payload,
+      )
+    ).data,
+  openReport: async (reportId: string) =>
+    (
+      await apiClient.post<TeacherReportDecision>(
+        `/teacher/copilot/reports/${reportId}/open`,
+      )
+    ).data,
+  recordReportDecisionAfter: async (
+    reportId: string,
+    payload: {
+      effect: TeacherReportEffect;
+      action: TeacherReportAction;
+      note?: string;
+      evidenceUsed?: string;
+      applied: TeacherReportApplication;
+      controlSpillover: boolean;
+    },
+  ) =>
+    (
+      await apiClient.put<TeacherReportDecision>(
+        `/teacher/copilot/reports/${reportId}/decision/after`,
+        payload,
       )
     ).data,
   runClassReport: async (publicationId: string, classId: string) =>

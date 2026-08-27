@@ -3951,6 +3951,13 @@ button:disabled {
   line-height: 1.65;
 }
 
+.lesson-generation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  margin-top: 0.35rem;
+}
+
 .lesson-generation-steps {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -6701,6 +6708,99 @@ button:disabled {
   flex-basis: 100%;
   color: var(--subtle);
   font-size: 0.65rem;
+}
+
+.report-decision-gate {
+  max-width: 38rem;
+}
+
+.report-decision-form {
+  display: grid;
+  gap: 0.8rem;
+  margin-top: 1.25rem;
+}
+
+.report-decision-form .textarea {
+  min-height: 5.25rem;
+}
+
+.report-decision-form .form-field label span {
+  color: var(--subtle);
+  font-weight: 450;
+}
+
+.report-decision-privacy {
+  margin-top: 0.9rem;
+  color: var(--subtle);
+  font-size: 0.68rem;
+  line-height: 1.5;
+}
+
+.report-after-capture {
+  margin-top: 1.5rem;
+  border: 1px solid var(--line);
+  border-radius: 0.85rem;
+  background: var(--surface-muted);
+  padding: 1rem;
+}
+
+.report-after-capture > h3 {
+  margin-top: 0.2rem;
+  color: var(--ink);
+  font-size: 0.92rem;
+}
+
+.report-after-capture > p:not(.workspace-kicker) {
+  margin-top: 0.3rem;
+  color: var(--subtle);
+  font-size: 0.7rem;
+}
+
+.report-decision-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.report-spillover-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.report-spillover-check input {
+  margin-top: 0.16rem;
+}
+
+.report-decision-complete {
+  display: flex;
+  gap: 0.65rem;
+  margin-top: 1.5rem;
+  border: 1px solid color-mix(in srgb, var(--success) 35%, var(--line));
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--success) 8%, var(--surface));
+  padding: 0.8rem;
+  color: var(--success);
+}
+
+.report-decision-complete strong {
+  color: var(--ink);
+  font-size: 0.75rem;
+}
+
+.report-decision-complete p {
+  margin-top: 0.2rem;
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+@media (max-width: 820px) {
+  .report-decision-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .import-result {

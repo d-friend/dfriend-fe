@@ -174,6 +174,90 @@ test("report tree keeps immutable source nesting and the detail panel restores k
   await context.close();
 });
 
+test("main report stays hidden until intent is saved, then captures the post-class effect", async ({ browser }) => {
+  const reports = reportSummaries();
+  let before: { action: string; note?: string } | null = null;
+  let openedAt: string | null = null;
+  let after: Record<string, unknown> | null = null;
+  let reportReads = 0;
+  const decisionPayload = () => ({
+    reportId: "report-main-v2",
+    reportVersion: 2,
+    publicationId: "publication-main",
+    lessonId: "lesson-main-1",
+    classId: "class-1",
+    before: before ? { ...before, recordedAt: "2026-08-27T01:00:00Z" } : null,
+    reportOpenedAt: openedAt,
+    after,
+  });
+  const context = await teacherContext(browser, async (route) => {
+    const request = route.request();
+    const pathname = new URL(request.url()).pathname;
+    if (pathname.endsWith("/teacher/classes")) {
+      return json(route, {
+        classes: [{ class_id: "class-1", class_name: "Lớp 8", description: "", class_code: "LOP8", student_count: 2 }],
+      });
+    }
+    if (pathname.endsWith("/teacher/classes/class-1/students")) return json(route, { students: [] });
+    if (pathname.endsWith("/teacher/classes/class-1/roadmap")) return json(route, []);
+    if (pathname.endsWith("/teacher/copilot/reports/report-main-v2/decision") && request.method() === "GET") {
+      return json(route, decisionPayload());
+    }
+    if (pathname.endsWith("/teacher/copilot/reports/report-main-v2/decision/before") && request.method() === "PUT") {
+      before = request.postDataJSON() as { action: string; note?: string };
+      return json(route, decisionPayload());
+    }
+    if (pathname.endsWith("/teacher/copilot/reports/report-main-v2/open") && request.method() === "POST") {
+      expect(before).not.toBeNull();
+      openedAt = "2026-08-27T01:01:00Z";
+      return json(route, decisionPayload());
+    }
+    if (pathname.endsWith("/teacher/copilot/reports/report-main-v2/decision/after") && request.method() === "PUT") {
+      const body = request.postDataJSON() as Record<string, unknown>;
+      after = { ...body, recordedAt: "2026-08-27T03:00:00Z" };
+      return json(route, decisionPayload());
+    }
+    if (pathname.endsWith("/teacher/copilot/reports/report-main-v2")) {
+      reportReads += 1;
+      return json(route, mainReportDetail(reports[0]));
+    }
+    if (pathname.endsWith("/teacher/copilot/reports")) return json(route, reports);
+    if (pathname.endsWith("/exercises/curriculum/skills")) return json(route, { skills: [] });
+    return shellApi(route);
+  });
+  const page = await context.newPage();
+  await page.goto(`${frontendUrl}/teacher/classes/class-1?tab=reports`);
+  await page.getByRole("button", { name: /Báo cáo lớp · v2/ }).click();
+
+  await expect(page.getByRole("heading", { name: "Trước khi xem báo cáo" })).toHaveCount(0);
+  await expect(page.getByText("Nếu chưa xem phân tích của D-Friend")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Kỹ năng lớp làm tốt" })).toHaveCount(0);
+  expect(reportReads).toBe(0);
+
+  await page.getByLabel("Kế hoạch dự kiến").selectOption("continue_as_planned");
+  await page.getByLabel(/Ghi chú ngắn/).fill("Tiếp tục theo giáo án hiện tại");
+  await page.getByRole("button", { name: "Lưu và mở báo cáo" }).click();
+  await expect(page.getByRole("heading", { name: "Kỹ năng lớp làm tốt" })).toBeVisible();
+  expect(reportReads).toBe(1);
+  expect(before).toEqual({ action: "continue_as_planned", note: "Tiếp tục theo giáo án hiện tại" });
+
+  await page.getByLabel("So với kế hoạch ban đầu").selectOption("changed");
+  await page.getByLabel("Hành động cuối cùng").selectOption("change_examples_or_exercises");
+  await page.getByLabel("Đã áp dụng trong lớp?").selectOption("yes");
+  await page.getByLabel(/Chi tiết nào trong report/).fill("Nhóm học sinh yếu ở bước biến đổi.");
+  await page.getByLabel(/dùng insight từ report/).check();
+  await page.getByRole("button", { name: "Lưu phản hồi sau tiết học" }).click();
+
+  await expect(page.getByText("Đã ghi nhận tác động sau tiết học")).toBeVisible();
+  expect(after).toMatchObject({
+    effect: "changed",
+    action: "change_examples_or_exercises",
+    applied: "yes",
+    controlSpillover: true,
+  });
+  await context.close();
+});
+
 async function teacherContext(
   browser: Browser,
   handler: (route: Route) => Promise<void>,
@@ -270,6 +354,28 @@ function followUpReportDetail(summary: ReturnType<typeof reportSummaries>[number
     report: {
       strengths: [], gaps: [], remedial_student_ids: [], advanced_student_ids: [], not_finished_student_ids: [], top_weak_skill_ids: [], attention_reasons: {}, student_names: {}, score_scale: 10,
       follow_up_student_outcomes: {}, follow_up_skill_deltas: {}, skill_metrics: {},
+    },
+  };
+}
+
+function mainReportDetail(summary: ReturnType<typeof reportSummaries>[number] | undefined) {
+  return {
+    ...summary,
+    concept: "monomials",
+    canPlanFollowUp: true,
+    canCreateNextMain: true,
+    report: {
+      strengths: ["math8:polynomials:monomials#identify-monomial"],
+      gaps: [],
+      remedial_student_ids: [],
+      advanced_student_ids: [],
+      on_track_student_ids: [],
+      not_finished_student_ids: [],
+      top_weak_skill_ids: [],
+      attention_reasons: {},
+      student_names: {},
+      score_scale: 10,
+      skill_metrics: {},
     },
   };
 }

@@ -37,7 +37,7 @@ export function FeedbackWorkspace({ lessonId }: { lessonId: string }) {
       query.state.data?.status === "FEEDBACK_PENDING" ? 3_000 : false,
   });
   const extrasQuery = useQuery({ queryKey: ["student", "extra", lessonId], queryFn: () => studentApi.extraExercises(lessonId), retry: 0 });
-  const summary = cachedSummary || reportQuery.data?.sessionSummary || null;
+  const summary = reportQuery.data?.sessionSummary || cachedSummary || null;
   const masteryReport = summary?.post_mastery_report || null;
   const strengths = masteryReport?.strengths || [];
   const gaps = masteryReport?.gaps || [];

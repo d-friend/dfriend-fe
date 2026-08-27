@@ -1,6 +1,6 @@
 "use client";
 
-import { WarningCircle } from "@phosphor-icons/react";
+import { BookOpenText, WarningCircle } from "@phosphor-icons/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { LessonGenerationLoading } from "@/components/teacher/lesson-generation-loading";
@@ -63,6 +63,7 @@ export function LessonGenerationJobWorkspace({ jobId }: { jobId: string }) {
   }
 
   if (partial) {
+    const partialLessonId = String(partial.lessonId || "");
     return (
       <section className="lesson-generation-screen">
         <div className="lesson-generation-panel">
@@ -73,7 +74,17 @@ export function LessonGenerationJobWorkspace({ jobId }: { jobId: string }) {
             Đã hoàn thành {partial.generationCompletedSlots || 0}
             {typeof partial.generationTotalSlots === "number" ? `/${partial.generationTotalSlots}` : ""} slot. Retry dùng lại đúng generation run này.
           </p>
-          <button className="primary-button" onClick={retryMissing}>Tạo tiếp phần còn thiếu</button>
+          <div className="lesson-generation-actions">
+            <button
+              className="secondary-button"
+              type="button"
+              disabled={!partialLessonId}
+              onClick={() => router.push(`/teacher/lessons/${encodeURIComponent(partialLessonId)}/review`)}
+            >
+              <BookOpenText size={16} /> Review bản hiện tại
+            </button>
+            <button className="primary-button" type="button" onClick={retryMissing}>Tạo tiếp phần còn thiếu</button>
+          </div>
         </div>
       </section>
     );

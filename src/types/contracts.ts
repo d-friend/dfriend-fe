@@ -363,6 +363,43 @@ export interface CopilotReportDetail extends CopilotReportSummary {
   };
 }
 
+export type TeacherReportAction =
+  | "continue_as_planned"
+  | "reteach_whole_class"
+  | "change_target_skill"
+  | "change_examples_or_exercises"
+  | "change_pacing"
+  | "group_students"
+  | "check_specific_students"
+  | "undecided"
+  | "other";
+
+export type TeacherReportEffect = "changed" | "confirmed" | "no_effect";
+export type TeacherReportApplication = "yes" | "partly" | "no";
+
+export interface TeacherReportDecision {
+  reportId: string;
+  reportVersion: number;
+  publicationId: string;
+  lessonId: string;
+  classId: string;
+  before: null | {
+    action: TeacherReportAction;
+    note: string | null;
+    recordedAt: string;
+  };
+  reportOpenedAt: string | null;
+  after: null | {
+    effect: TeacherReportEffect;
+    action: TeacherReportAction;
+    note: string | null;
+    evidenceUsed: string | null;
+    applied: TeacherReportApplication;
+    controlSpillover: boolean;
+    recordedAt: string;
+  };
+}
+
 export interface CurriculumConcept {
   value: string;
   label: string;

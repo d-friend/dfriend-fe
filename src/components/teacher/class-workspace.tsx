@@ -26,7 +26,7 @@ import { useEffect, useMemo, useState, type CSSProperties, type FormEvent, type 
 import { MathContent } from "@/components/shared/math-content";
 import { getApiErrorMessage, teacherApi } from "@/lib/api-client";
 import { skillDisplayName, skillLabelMap } from "@/lib/skill-labels";
-import type { ClassTab, CopilotReportDetail, CopilotReportSummary, TeacherRoadmapItem, TeacherSubmission } from "@/types/contracts";
+import type { ClassTab, CopilotReportDetail, CopilotReportSummary, TeacherReportAction, TeacherReportApplication, TeacherReportEffect, TeacherRoadmapItem, TeacherSubmission } from "@/types/contracts";
 
 export function ClassWorkspace({ classId }: { classId: string }) {
   const pathname = usePathname();
@@ -375,10 +375,76 @@ function extractMarkdownSection(value: string, heading: string) {
   return (nextHeading >= 0 ? afterHeading.slice(0, nextHeading) : afterHeading).trim();
 }
 
-function ReportDetail({ summary, classId, completedCount, studentCount }: { summary?: CopilotReportSummary; classId: string; completedCount: number; studentCount: number }) {
+const teacherReportActionOptions: Array<{ value: TeacherReportAction; label: string }> = [
+  { value: "continue_as_planned", label: "Dạy tiếp như kế hoạch" },
+  { value: "reteach_whole_class", label: "Dạy lại cho cả lớp" },
+  { value: "change_target_skill", label: "Đổi kỹ năng trọng tâm" },
+  { value: "change_examples_or_exercises", label: "Đổi ví dụ hoặc bài tập" },
+  { value: "change_pacing", label: "Đổi nhịp độ tiết học" },
+  { value: "group_students", label: "Chia nhóm học sinh" },
+  { value: "check_specific_students", label: "Kiểm tra một số học sinh" },
+  { value: "undecided", label: "Chưa quyết định" },
+  { value: "other", label: "Khác" },
+];
+
+function ReportDetail(props: { summary?: CopilotReportSummary; classId: string; completedCount: number; studentCount: number }) {
+  return <ReportDetailInner key={props.summary?.reportId || "missing-report"} {...props} />;
+}
+
+function ReportDetailInner({ summary, classId, completedCount, studentCount }: { summary?: CopilotReportSummary; classId: string; completedCount: number; studentCount: number }) {
   const queryClient = useQueryClient();
   const reportId = summary?.reportId || "";
-  const report = useQuery({ queryKey: ["teacher", "copilot", reportId, "report"], queryFn: () => teacherApi.report(reportId), enabled: Boolean(reportId) });
+  const requiresDecision = Boolean(reportId && summary?.status === "REPORT_READY" && summary.reportKind !== "follow_up_outcome");
+  const [beforeAction, setBeforeAction] = useState<TeacherReportAction | "">("");
+  const [beforeNote, setBeforeNote] = useState<string | null>(null);
+  const [afterEffect, setAfterEffect] = useState<TeacherReportEffect | "">("");
+  const [afterAction, setAfterAction] = useState<TeacherReportAction | "">("");
+  const [afterApplied, setAfterApplied] = useState<TeacherReportApplication | "">("");
+  const [afterEvidence, setAfterEvidence] = useState("");
+  const [afterNote, setAfterNote] = useState("");
+  const [controlSpillover, setControlSpillover] = useState(false);
+
+  const decision = useQuery({
+    queryKey: ["teacher", "copilot", reportId, "decision"],
+    queryFn: () => teacherApi.reportDecision(reportId),
+    enabled: requiresDecision,
+  });
+  const selectedBeforeAction = beforeAction || decision.data?.before?.action || "";
+  const selectedBeforeNote = beforeNote ?? decision.data?.before?.note ?? "";
+
+  const report = useQuery({
+    queryKey: ["teacher", "copilot", reportId, "report"],
+    queryFn: () => teacherApi.report(reportId),
+    enabled: Boolean(reportId && (!requiresDecision || decision.data?.reportOpenedAt)),
+  });
+  const revealReport = useMutation({
+    mutationFn: async () => {
+      if (!selectedBeforeAction) throw new Error("Chọn kế hoạch dự kiến trước khi mở báo cáo.");
+      await teacherApi.recordReportDecisionBefore(reportId, {
+        action: selectedBeforeAction,
+        ...(selectedBeforeNote.trim() ? { note: selectedBeforeNote.trim() } : {}),
+      });
+      return teacherApi.openReport(reportId);
+    },
+    onSuccess: (data) => {
+      queryClient.setQueryData(["teacher", "copilot", reportId, "decision"], data);
+      void queryClient.invalidateQueries({ queryKey: ["teacher", "copilot", reportId, "report"] });
+    },
+  });
+  const saveAfterDecision = useMutation({
+    mutationFn: () => {
+      if (!afterEffect || !afterAction || !afterApplied) throw new Error("Điền đủ ba lựa chọn bắt buộc.");
+      return teacherApi.recordReportDecisionAfter(reportId, {
+        effect: afterEffect,
+        action: afterAction,
+        applied: afterApplied,
+        controlSpillover,
+        ...(afterEvidence.trim() ? { evidenceUsed: afterEvidence.trim() } : {}),
+        ...(afterNote.trim() ? { note: afterNote.trim() } : {}),
+      });
+    },
+    onSuccess: (data) => queryClient.setQueryData(["teacher", "copilot", reportId, "decision"], data),
+  });
   const skillLabels = useQuery({ queryKey: ["curriculum", "skills", report.data?.subject, report.data?.topic, report.data?.concept], queryFn: () => teacherApi.curriculumSkills(report.data?.subject || "", report.data?.topic || "", report.data?.concept || ""), enabled: Boolean(report.data?.subject && report.data?.topic && report.data?.concept), staleTime: Infinity });
   const runReport = useMutation({
     mutationFn: async () => {
@@ -396,6 +462,11 @@ function ReportDetail({ summary, classId, completedCount, studentCount }: { summ
   const runAction = <div className="report-manual-run"><p>{completedCount}/{studentCount} học sinh đã hoàn thành.</p><button className="secondary-button" disabled={cannotRun} onClick={() => runReport.mutate()}><Sparkle size={16} weight="fill" />{runReport.isPending ? "Đang gửi yêu cầu" : summary.status === "ANALYSING" ? "Đang phân tích" : runLabel}</button>{completedCount === 0 ? <small>Cần ít nhất một học sinh hoàn thành trước khi chạy báo cáo.</small> : null}{runReport.isError ? <small className="student-form-error">{getApiErrorMessage(runReport.error, "Không thể chạy báo cáo.")}</small> : null}</div>;
 
   if (summary.status !== "REPORT_READY") return <div className="detail-content"><p className="workspace-kicker">Báo cáo bài học</p><h2>{summary.title}</h2><div className="report-processing"><ClockCounterClockwise size={28} /><h3>{statusLabel(summary.status)}</h3><p>{summary.status === "ANALYSING" ? "Copilot đang tạo một immutable report version cho lớp này." : "Bạn có thể chạy báo cáo từ dữ liệu hiện có mà không cần chờ deadline."}</p></div>{runAction}</div>;
+  if (requiresDecision && decision.isLoading) return <div className="detail-content"><ListSkeleton /></div>;
+  if (requiresDecision && decision.isError) return <div className="detail-content"><ListError error={decision.error} /></div>;
+  if (requiresDecision && !decision.data?.reportOpenedAt) {
+    return <div className="detail-content report-decision-gate"><p className="workspace-kicker">Trước khi xem báo cáo</p><h2>{summary.title}</h2><p className="detail-lead">Nếu chưa xem phân tích của D-Friend, cô dự định làm gì ở tiết học sắp tới?</p><form className="report-decision-form" onSubmit={(event) => { event.preventDefault(); revealReport.mutate(); }}><div className="form-field"><label htmlFor={`before-action-${reportId}`}>Kế hoạch dự kiến</label><select id={`before-action-${reportId}`} className="input" value={selectedBeforeAction} onChange={(event) => setBeforeAction(event.target.value as TeacherReportAction)} required><option value="" disabled>Chọn một phương án</option>{teacherReportActionOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></div><div className="form-field"><label htmlFor={`before-note-${reportId}`}>Ghi chú ngắn <span>(không bắt buộc)</span></label><textarea id={`before-note-${reportId}`} className="textarea" maxLength={500} value={selectedBeforeNote} onChange={(event) => setBeforeNote(event.target.value)} placeholder="Ví dụ: tiếp tục luyện biến đổi căn thức" /></div><button className="primary-button" disabled={!selectedBeforeAction || revealReport.isPending}>{revealReport.isPending ? "Đang lưu" : "Lưu và mở báo cáo"}</button>{revealReport.isError ? <p className="student-form-error">{getApiErrorMessage(revealReport.error, "Không thể mở báo cáo.")}</p> : null}</form><p className="report-decision-privacy">Câu trả lời này chỉ dùng để đo xem báo cáo có làm thay đổi quyết định dạy hay không.</p></div>;
+  }
   if (report.isLoading) return <div className="detail-content"><ListSkeleton /></div>;
   if (report.isError) return <div className="detail-content"><ListError error={report.error} /></div>;
   const data = report.data;
@@ -403,7 +474,20 @@ function ReportDetail({ summary, classId, completedCount, studentCount }: { summ
   const skill = data.report;
   const labels = skillLabelMap(skillLabels.data);
   const followUpReport = data.reportKind === "follow_up_outcome";
-  return <div className="detail-content report-detail"><p className="workspace-kicker">{followUpReport ? data.lessonKind === "remedial" ? "Kết quả phụ đạo" : "Kết quả nâng cao" : "Báo cáo bài học"}</p><h2>{data.title}</h2><p className="detail-lead">Phiên bản {data.reportVersion || 1}, phân tích từ {data.totalStudents} học sinh, thang điểm {skill.score_scale}.</p><SkillPerformanceTable metrics={skill.skill_metrics} labels={labels} />{followUpReport ? <FollowUpOutcomes outcomes={skill.follow_up_student_outcomes} deltas={skill.follow_up_skill_deltas} names={skill.student_names} labels={labels} /> : <><section className="detail-section"><h3>Kỹ năng lớp làm tốt</h3><SkillChips items={skill.strengths} labels={labels} empty="Chưa có kỹ năng nổi bật." /></section><section className="detail-section"><h3>Cần củng cố</h3><SkillChips items={skill.top_weak_skill_ids.length ? skill.top_weak_skill_ids : skill.gaps} labels={labels} empty="Không có khoảng trống kỹ năng đáng kể." warning /></section>{skill.not_assessed_skill_ids?.length ? <section className="detail-section"><h3>Chưa được đánh giá</h3><SkillChips items={skill.not_assessed_skill_ids} labels={labels} empty="" /></section> : null}<GroupList title="Cần phụ đạo" ids={skill.remedial_student_ids} names={skill.student_names} /><GroupList title="Đang theo kịp" ids={skill.on_track_student_ids || []} names={skill.student_names} /><GroupList title="Có thể nâng cao" ids={skill.advanced_student_ids} names={skill.student_names} /></>}<GroupList title="Chưa hoàn thành" ids={skill.not_finished_student_ids} names={skill.student_names} />{skill.not_assessed_student_ids?.length ? <GroupList title="Đã hoàn thành nhưng chưa có evidence" ids={skill.not_assessed_student_ids} names={skill.student_names} /> : null}{runAction}<section className="report-actions">{data.canPlanFollowUp && <Link className="primary-button" href={`/teacher/copilot/${reportId}/extra`}><Sparkle size={16} weight="fill" /> Tạo bài follow-up</Link>}<Link className="secondary-button" href={`/teacher/lessons/new?fromReport=${reportId}`}>Tạo bài tiếp theo</Link></section></div>;
+  const afterCapture = requiresDecision ? decision.data?.after ? <section className="report-decision-complete"><CheckCircle size={20} weight="fill" /><div><strong>Đã ghi nhận tác động sau tiết học</strong><p>{teacherEffectLabel(decision.data.after.effect)} · {teacherActionLabel(decision.data.after.action)} · áp dụng {teacherApplicationLabel(decision.data.after.applied)}</p></div></section> : <section className="report-after-capture"><p className="workspace-kicker">Sau tiết học</p><h3>Báo cáo này đã tác động thế nào?</h3><p>Điền sau khi dạy xong. Khoảng một phút.</p><form className="report-decision-form" onSubmit={(event) => { event.preventDefault(); saveAfterDecision.mutate(); }}><div className="report-decision-grid"><div className="form-field"><label htmlFor={`after-effect-${reportId}`}>So với kế hoạch ban đầu</label><select id={`after-effect-${reportId}`} className="input" value={afterEffect} onChange={(event) => setAfterEffect(event.target.value as TeacherReportEffect)} required><option value="" disabled>Chọn tác động</option><option value="changed">Đã thay đổi kế hoạch</option><option value="confirmed">Củng cố quyết định cũ</option><option value="no_effect">Không có tác động</option></select></div><div className="form-field"><label htmlFor={`after-action-${reportId}`}>Hành động cuối cùng</label><select id={`after-action-${reportId}`} className="input" value={afterAction} onChange={(event) => setAfterAction(event.target.value as TeacherReportAction)} required><option value="" disabled>Chọn hành động</option>{teacherReportActionOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></div><div className="form-field"><label htmlFor={`after-applied-${reportId}`}>Đã áp dụng trong lớp?</label><select id={`after-applied-${reportId}`} className="input" value={afterApplied} onChange={(event) => setAfterApplied(event.target.value as TeacherReportApplication)} required><option value="" disabled>Chọn mức độ</option><option value="yes">Có</option><option value="partly">Một phần</option><option value="no">Không</option></select></div></div><div className="form-field"><label htmlFor={`after-evidence-${reportId}`}>Chi tiết nào trong report có ích? <span>(không bắt buộc)</span></label><textarea id={`after-evidence-${reportId}`} className="textarea" maxLength={1000} value={afterEvidence} onChange={(event) => setAfterEvidence(event.target.value)} /></div><div className="form-field"><label htmlFor={`after-note-${reportId}`}>Ghi chú sau tiết học <span>(không bắt buộc)</span></label><textarea id={`after-note-${reportId}`} className="textarea" maxLength={500} value={afterNote} onChange={(event) => setAfterNote(event.target.value)} /></div><label className="report-spillover-check"><input type="checkbox" checked={controlSpillover} onChange={(event) => setControlSpillover(event.target.checked)} /><span>Tôi đã dùng insight từ report này khi dạy lớp đối chứng.</span></label><button className="secondary-button" disabled={!afterEffect || !afterAction || !afterApplied || saveAfterDecision.isPending}>{saveAfterDecision.isPending ? "Đang lưu" : "Lưu phản hồi sau tiết học"}</button>{saveAfterDecision.isError ? <p className="student-form-error">{getApiErrorMessage(saveAfterDecision.error, "Không thể lưu phản hồi.")}</p> : null}</form></section> : null;
+  return <div className="detail-content report-detail"><p className="workspace-kicker">{followUpReport ? data.lessonKind === "remedial" ? "Kết quả phụ đạo" : "Kết quả nâng cao" : "Báo cáo bài học"}</p><h2>{data.title}</h2><p className="detail-lead">Phiên bản {data.reportVersion || 1}, phân tích từ {data.totalStudents} học sinh, thang điểm {skill.score_scale}.</p><SkillPerformanceTable metrics={skill.skill_metrics} labels={labels} />{followUpReport ? <FollowUpOutcomes outcomes={skill.follow_up_student_outcomes} deltas={skill.follow_up_skill_deltas} names={skill.student_names} labels={labels} /> : <><section className="detail-section"><h3>Kỹ năng lớp làm tốt</h3><SkillChips items={skill.strengths} labels={labels} empty="Chưa có kỹ năng nổi bật." /></section><section className="detail-section"><h3>Cần củng cố</h3><SkillChips items={skill.top_weak_skill_ids.length ? skill.top_weak_skill_ids : skill.gaps} labels={labels} empty="Không có khoảng trống kỹ năng đáng kể." warning /></section>{skill.not_assessed_skill_ids?.length ? <section className="detail-section"><h3>Chưa được đánh giá</h3><SkillChips items={skill.not_assessed_skill_ids} labels={labels} empty="" /></section> : null}<GroupList title="Cần phụ đạo" ids={skill.remedial_student_ids} names={skill.student_names} /><GroupList title="Đang theo kịp" ids={skill.on_track_student_ids || []} names={skill.student_names} /><GroupList title="Có thể nâng cao" ids={skill.advanced_student_ids} names={skill.student_names} /></>}<GroupList title="Chưa hoàn thành" ids={skill.not_finished_student_ids} names={skill.student_names} />{skill.not_assessed_student_ids?.length ? <GroupList title="Đã hoàn thành nhưng chưa có evidence" ids={skill.not_assessed_student_ids} names={skill.student_names} /> : null}{afterCapture}{runAction}<section className="report-actions">{data.canPlanFollowUp && <Link className="primary-button" href={`/teacher/copilot/${reportId}/extra`}><Sparkle size={16} weight="fill" /> Tạo bài follow-up</Link>}<Link className="secondary-button" href={`/teacher/lessons/new?fromReport=${reportId}`}>Tạo bài tiếp theo</Link></section></div>;
+}
+
+function teacherActionLabel(value: TeacherReportAction) {
+  return teacherReportActionOptions.find((option) => option.value === value)?.label || value;
+}
+
+function teacherEffectLabel(value: TeacherReportEffect) {
+  return value === "changed" ? "Đã thay đổi kế hoạch" : value === "confirmed" ? "Củng cố quyết định cũ" : "Không có tác động";
+}
+
+function teacherApplicationLabel(value: TeacherReportApplication) {
+  return value === "yes" ? "đầy đủ" : value === "partly" ? "một phần" : "không áp dụng";
 }
 
 function FollowUpOutcomes({ outcomes, deltas, names, labels }: { outcomes?: NonNullable<CopilotReportDetail["report"]>["follow_up_student_outcomes"]; deltas?: NonNullable<CopilotReportDetail["report"]>["follow_up_skill_deltas"]; names: Record<string, string>; labels: Record<string, string> }) {

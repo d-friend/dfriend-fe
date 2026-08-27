@@ -59,6 +59,9 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
     setUiState("initialising");
     setSessionError("");
     try {
+      // Entering Session 2 means any lesson-scoped feedback belongs to an
+      // earlier attempt. The current close will write a fresh summary.
+      sessionStorage.removeItem(`dfriend:feedback:${lessonId}`);
       const active = await studentApi.activeSession(lessonId);
       const value = active.status === "not_found" ? await studentApi.startSession(lessonId) : active;
       if (!value.session_id || !value.problems?.length) throw new Error("Session 2 chưa có bài tập để bắt đầu.");
