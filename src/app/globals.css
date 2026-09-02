@@ -2680,6 +2680,8 @@ button:disabled {
 .checkpoint-options label { display: grid; grid-template-columns: auto 1.8rem minmax(0, 1fr); align-items: center; gap: 0.4rem; border: 1px solid var(--line); border-radius: var(--radius-control); padding: 0.65rem; }
 .checkpoint-options label[data-selected="true"] { border-color: var(--brand); background: var(--brand-soft); }
 .checkpoint-options label > span { display: grid; width: 1.6rem; height: 1.6rem; place-items: center; border-radius: 0.45rem; background: var(--surface-muted); font-size: 0.62rem; }
+.checkpoint-options[data-question-type="true_false"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.checkpoint-options[data-question-type="true_false"] label { grid-template-columns: auto minmax(0, 1fr); }
 .checkpoint-option { min-width: 0; font-size: 0.7rem; font-weight: 550; }
 .checkpoint-option .katex-display { margin: 0; padding: 0; text-align: left; }
 .checkpoint-feedback { display: flex; align-items: flex-start; gap: 0.55rem; margin-top: 0.8rem; border-radius: var(--radius-control); padding: 0.7rem; }
