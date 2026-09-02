@@ -29,13 +29,15 @@ export function LessonGenerationJobWorkspace({ jobId }: { jobId: string }) {
     void waitForLessonGeneration(activeJobId, setDetail)
       .then((result) => {
         if (cancelled) return;
-        if (result.generationStatus === "partial") {
+        if (result.generationStatus === "partial_blocked" || result.generationStatus === "partial") {
           setPartial(result);
           return;
         }
         const lessonId = String(result.lessonId || "");
         if (!lessonId) throw new Error("Backend chưa trả mã lesson để mở review.");
-        router.replace(`/teacher/lessons/${encodeURIComponent(lessonId)}/review`);
+        router.replace(
+          `/teacher/lessons/${encodeURIComponent(lessonId)}/review?generationJobId=${encodeURIComponent(activeJobId)}`,
+        );
       })
       .catch((generationError) => {
         if (!cancelled) {
@@ -72,14 +74,14 @@ export function LessonGenerationJobWorkspace({ jobId }: { jobId: string }) {
           <h1>Còn slot chưa đạt chuẩn</h1>
           <p className="lesson-generation-lead">
             Đã hoàn thành {partial.generationCompletedSlots || 0}
-            {typeof partial.generationTotalSlots === "number" ? `/${partial.generationTotalSlots}` : ""} slot. Retry dùng lại đúng generation run này.
+            {typeof partial.generationTotalSlots === "number" ? `/${partial.generationTotalSlots}` : ""} slot nhưng chưa có arc 4/4. Retry dùng lại đúng generation run này.
           </p>
           <div className="lesson-generation-actions">
             <button
               className="secondary-button"
               type="button"
               disabled={!partialLessonId}
-              onClick={() => router.push(`/teacher/lessons/${encodeURIComponent(partialLessonId)}/review`)}
+              onClick={() => router.push(`/teacher/lessons/${encodeURIComponent(partialLessonId)}/review?generationJobId=${encodeURIComponent(activeJobId)}`)}
             >
               <BookOpenText size={16} /> Review bản hiện tại
             </button>

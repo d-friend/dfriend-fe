@@ -190,7 +190,7 @@ export function LessonAuthoring() {
       setPhase("generating");
       try {
         const lesson1 = await waitForLessonGeneration(activeJobId, setGenerationStep);
-        if (lesson1.generationStatus === "partial") {
+        if (lesson1.generationStatus === "partial_blocked" || lesson1.generationStatus === "partial") {
           setPartialGeneration(lesson1);
           setPhase("goal");
           return;
@@ -290,7 +290,7 @@ export function LessonAuthoring() {
       const lesson1 = queued.jobId
         ? await waitForLessonGeneration(String(queued.jobId), setGenerationStep)
         : queued;
-      if (lesson1.generationStatus === "partial") {
+      if (lesson1.generationStatus === "partial_blocked" || lesson1.generationStatus === "partial") {
         setPartialGeneration(lesson1);
         setPhase("goal");
         return;
@@ -312,7 +312,7 @@ export function LessonAuthoring() {
       const queued = await teacherApi.retryMissingLessonSlots(activeJobId);
       setActiveJobId(queued.jobId);
       const result = await waitForLessonGeneration(queued.jobId, setGenerationStep);
-      if (result.generationStatus === "partial") {
+      if (result.generationStatus === "partial_blocked" || result.generationStatus === "partial") {
         setPartialGeneration(result);
         setPhase("goal");
         return;

@@ -3,10 +3,11 @@ import { isApiErrorStatus, teacherApi } from "@/lib/api-client";
 export type LessonGenerationResult = Record<string, unknown> & {
   lessonId?: string;
   problemCount?: number;
-  generationStatus?: "complete" | "partial" | null;
+  generationStatus?: "complete" | "partial_ready" | "partial_blocked" | "partial" | null;
   generationCompletedSlots?: number;
   generationTotalSlots?: number;
   generationMissingSlotIds?: string[];
+  generationCompleteArcIds?: string[];
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -34,8 +35,10 @@ export async function waitForLessonGeneration(
     const progress = isRecord(job.progress) ? String(job.progress.stage || "") : "";
     if (progress === "precheck") onStage("Đang kiểm tra kỹ năng và nguồn bài phù hợp");
     if (progress === "knowledge") onStage("Đang soạn Session 1 theo kỹ năng và mục tiêu");
-    if (progress === "partial") onStage("Đã giữ phần đạt chuẩn, còn một số slot cần tạo tiếp");
-    if (["ready", "partial"].includes(String(job.status)) && isRecord(job.result)) return job.result;
+    if (progress === "retrying") onStage("Kết nối bị gián đoạn, đang tiếp tục đúng tiến trình đã lưu");
+    if (progress === "partial_ready") onStage("Một arc hoàn chỉnh đã sẵn sàng để review");
+    if (progress === "partial_blocked" || progress === "partial") onStage("Đã giữ phần đạt chuẩn, chưa có arc hoàn chỉnh");
+    if (["ready", "partial_ready", "partial_blocked", "partial"].includes(String(job.status)) && isRecord(job.result)) return job.result;
     if (job.status === "failed") {
       const jobError = isRecord(job.error) ? job.error.message : job.error;
       const error = new Error(String(jobError || "Không thể tạo bài học."));
