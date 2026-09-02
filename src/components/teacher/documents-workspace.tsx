@@ -216,8 +216,8 @@ export function DocumentsWorkspace() {
               <div className="document-card-top"><span className="document-file-icon"><File size={21} /></span><span className="document-visibility">{document.shared ? <UsersThree size={14} /> : <LockSimple size={14} />}{document.shared ? "Dùng chung" : "Riêng tư"}</span></div>
               <div><h2>{document.title}</h2><p>{document.description || document.fileName || "Nguồn bài tập đã phân loại"}</p></div>
               <div className="taxonomy-path"><span>{document.subject}</span><span>{document.topic}</span><span>{document.concept || "Tài liệu chung"}</span></div>
-              {document.indexStatus === "needs_manual" && <p className="document-index-help">Tệp nguồn không đọc được. Xóa và tải lại tệp để dùng cho Copilot.</p>}
-              <footer><span>{documentIndexLabel(document.indexStatus)} · {formatDate(document.createdAt)}</span><div>{document.previewUrl && <a className="icon-button" href={document.previewUrl} target="_blank" rel="noreferrer" aria-label="Xem tài liệu"><ArrowSquareOut size={16} /></a>}{document.indexStatus === "failed" && <button className="icon-button" disabled={retryIndex.isPending} onClick={() => retryIndex.mutate(document.documentId)} aria-label="Lập chỉ mục lại"><ArrowsClockwise size={16} /></button>}<button className="icon-button" onClick={() => { if (window.confirm("Xóa tài liệu khỏi kho?")) remove.mutate(document.documentId); }} aria-label="Xóa tài liệu"><Trash size={16} /></button></div></footer>
+              {document.indexStatus === "needs_manual" && <p className="document-index-help">{documentIndexHelp(document.indexSummary)}</p>}
+              <footer><span>{documentIndexLabel(document.indexStatus)} · {formatDate(document.createdAt)}</span><div>{document.previewUrl && <a className="icon-button" href={document.previewUrl} target="_blank" rel="noreferrer" aria-label="Xem tài liệu"><ArrowSquareOut size={16} /></a>}{(document.indexStatus === "failed" || document.indexStatus === "needs_manual") && <button className="icon-button" disabled={retryIndex.isPending} onClick={() => retryIndex.mutate(document.documentId)} aria-label="Lập chỉ mục lại"><ArrowsClockwise size={16} /></button>}<button className="icon-button" onClick={() => { if (window.confirm("Xóa tài liệu khỏi kho?")) remove.mutate(document.documentId); }} aria-label="Xóa tài liệu"><Trash size={16} /></button></div></footer>
             </article>
           ))}
         </div>
@@ -243,4 +243,12 @@ function documentIndexLabel(status: string) {
   if (status === "needs_manual") return "Cần thay tệp nguồn";
   if (status === "failed") return "Chưa thể lập chỉ mục";
   return "Đang lập chỉ mục";
+}
+
+function documentIndexHelp(summary?: Record<string, number>) {
+  const total = Number(summary?.total || 0);
+  if (total > 0) {
+    return `Đã đọc được ${total} mục, nhưng chưa gắn đủ chắc vào kỹ năng. Hãy kiểm tra taxonomy hoặc thử lập chỉ mục lại.`;
+  }
+  return "Không tìm thấy nội dung chữ có thể dùng. Hãy kiểm tra tệp rồi tải lại.";
 }
