@@ -47,7 +47,12 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
   const [published, setPublished] = useState(false);
   const [titleOverride, setTitleOverride] = useState<string | null>(null);
 
-  const draftQuery = useQuery({ queryKey: ["teacher", "copilot", "draft", lessonId], queryFn: () => teacherApi.copilotDraft(lessonId) });
+  const draftQuery = useQuery({
+    queryKey: ["teacher", "copilot", "draft", lessonId],
+    queryFn: () => teacherApi.copilotDraft(lessonId),
+    staleTime: 0,
+    refetchOnMount: "always",
+  });
   const classes = useQuery({ queryKey: ["teacher", "classes"], queryFn: teacherApi.classes });
   const draft = draftQuery.data;
   const kind = String(draft?.kind || draft?.lesson_kind || "main");
@@ -62,6 +67,8 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
     queryKey: ["teacher", "draft", lessonId, "publish-readiness", revision, approved],
     queryFn: () => teacherApi.checkLessonPublish(lessonId, revision),
     enabled: Boolean(draft),
+    staleTime: 0,
+    refetchOnMount: "always",
   });
   const draftClassIds = Array.isArray(draft?.class_ids)
     ? draft.class_ids.filter((id): id is string => typeof id === "string")
