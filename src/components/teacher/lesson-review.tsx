@@ -26,6 +26,7 @@ type BlueprintSlot = {
 
 type BlueprintArc = {
   arc_id: string;
+  difficulty_tier?: "easy" | "medium" | "hard" | null;
   slot_ids?: string[];
 };
 
@@ -47,11 +48,25 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
   const [published, setPublished] = useState(false);
   const [titleOverride, setTitleOverride] = useState<string | null>(null);
 
+  const generationJobQuery = useQuery({
+    queryKey: ["teacher", "lesson-generation", generationJobId],
+    queryFn: () => teacherApi.lessonGenerationJob(generationJobId),
+    enabled: Boolean(generationJobId),
+    refetchInterval: (query) => {
+      const status = String((query.state.data as Record<string, unknown> | undefined)?.status || "");
+      return ["ready", "partial_ready", "partial_blocked", "partial", "failed"].includes(status) ? false : 1200;
+    },
+  });
+
   const draftQuery = useQuery({
     queryKey: ["teacher", "copilot", "draft", lessonId],
     queryFn: () => teacherApi.copilotDraft(lessonId),
     staleTime: 0,
     refetchOnMount: "always",
+    refetchInterval: () => {
+      const status = String(generationJobQuery.data?.status || "");
+      return generationJobId && !["ready", "partial_ready", "partial_blocked", "partial", "failed"].includes(status) ? 1200 : false;
+    },
   });
   const classes = useQuery({ queryKey: ["teacher", "classes"], queryFn: teacherApi.classes });
   const draft = draftQuery.data;
@@ -245,7 +260,7 @@ function MasteryArcMatrix({
             <article key={arc.arc_id} className="mastery-arc-card" data-complete={complete}>
               <header>
                 <div>
-                  <span>Arc {index + 1}</span>
+                  <span>Arc {index + 1}{arc.difficulty_tier ? ` · ${tierLabel(arc.difficulty_tier)}` : ""}</span>
                   <h3>{complete ? "Sẵn sàng xuất bản" : "Còn thiếu slot"}</h3>
                 </div>
                 <b>{arcSlots.filter((slot) => slot?.problem_id && problems.has(slot.problem_id)).length}/4</b>
@@ -317,6 +332,9 @@ function buildBlueprintModel(value: Record<string, unknown> | null): BlueprintMo
   const arcs = Array.isArray(value.arcs)
     ? value.arcs.filter(isRecord).map((arc) => ({
       arc_id: String(arc.arc_id || ""),
+      difficulty_tier: ["easy", "medium", "hard"].includes(String(arc.difficulty_tier))
+        ? String(arc.difficulty_tier) as "easy" | "medium" | "hard"
+        : null,
       slot_ids: Array.isArray(arc.slot_ids) ? arc.slot_ids.map(String) : [],
     })).filter((arc) => arc.arc_id)
     : arcIds.map((arc_id) => ({ arc_id }));
@@ -409,3 +427,4 @@ function defaultDeadline() { const date = new Date(Date.now() + 7 * 24 * 60 * 60
 function asRecord(value: unknown): Record<string, unknown> | null { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null; }
 function isRecord(value: unknown): value is Record<string, unknown> { return Boolean(asRecord(value)); }
 function readableSkill(value: string) { return (value.split("#").pop() || value).replace(/[-_]+/g, " "); }
+function tierLabel(tier: "easy" | "medium" | "hard") { return { easy: "Cơ bản", medium: "Vừa sức", hard: "Nâng cao" }[tier]; }
