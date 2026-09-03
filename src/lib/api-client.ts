@@ -139,6 +139,13 @@ export interface CompletePoolResult {
   }>;
 }
 
+export interface PublishReadiness {
+  publishable: boolean;
+  blockers: Array<Record<string, unknown>>;
+  complete_arc_ids: string[];
+  publishable_arc_ids: string[];
+}
+
 export const adminApi = {
   me: async () => (await apiClient.get<AuthUser>("/auth/me")).data,
   overview: async () => (await apiClient.get<AdminOverview>("/admin/overview")).data,
@@ -469,6 +476,13 @@ export const teacherApi = {
         `/exercises/ai-drafts/${lessonId}/review/regenerate`,
         { targets, expectedRevision },
         { timeout: 360_000 },
+      )
+    ).data,
+  checkLessonPublish: async (lessonId: string, expectedRevision: number) =>
+    (
+      await apiClient.post<PublishReadiness>(
+        `/exercises/ai-drafts/${lessonId}/publish-check`,
+        { expectedRevision },
       )
     ).data,
   publishCopilotDraft: async (

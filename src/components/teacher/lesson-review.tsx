@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ArrowLeft, ArrowsClockwise, Check, CheckCircle, CircleNotch, ShieldCheck, WarningCircle } from "@phosphor-icons/react";
 import { useMemo, useState } from "react";
@@ -26,6 +26,7 @@ type BlueprintSlot = {
 
 type BlueprintArc = {
   arc_id: string;
+  difficulty_tier?: "easy" | "medium" | "hard" | null;
   slot_ids?: string[];
 };
 
@@ -37,6 +38,8 @@ type BlueprintModel = {
 
 export function LessonReview({ lessonId }: { lessonId: string }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const generationJobId = searchParams.get("generationJobId") || "";
   const [classIds, setClassIds] = useState<string[] | null>(null);
   const [deadline, setDeadline] = useState(defaultDeadline());
   const [rejected, setRejected] = useState<Set<string>>(new Set());
@@ -45,7 +48,26 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
   const [published, setPublished] = useState(false);
   const [titleOverride, setTitleOverride] = useState<string | null>(null);
 
-  const draftQuery = useQuery({ queryKey: ["teacher", "copilot", "draft", lessonId], queryFn: () => teacherApi.copilotDraft(lessonId) });
+  const generationJobQuery = useQuery({
+    queryKey: ["teacher", "lesson-generation", generationJobId],
+    queryFn: () => teacherApi.lessonGenerationJob(generationJobId),
+    enabled: Boolean(generationJobId),
+    refetchInterval: (query) => {
+      const status = String((query.state.data as Record<string, unknown> | undefined)?.status || "");
+      return ["ready", "partial_ready", "partial_blocked", "partial", "failed"].includes(status) ? false : 1200;
+    },
+  });
+
+  const draftQuery = useQuery({
+    queryKey: ["teacher", "copilot", "draft", lessonId],
+    queryFn: () => teacherApi.copilotDraft(lessonId),
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchInterval: () => {
+      const status = String(generationJobQuery.data?.status || "");
+      return generationJobId && !["ready", "partial_ready", "partial_blocked", "partial", "failed"].includes(status) ? 1200 : false;
+    },
+  });
   const classes = useQuery({ queryKey: ["teacher", "classes"], queryFn: teacherApi.classes });
   const draft = draftQuery.data;
   const kind = String(draft?.kind || draft?.lesson_kind || "main");
@@ -56,6 +78,13 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
   const goal = String(draft?.lesson_goal_raw || draft?.goal_text || "Review nội dung trước khi xuất bản.");
   const revision = Number(draft?.revision || 1);
   const approved = Number(draft?.approved_revision || 0) === revision;
+  const readinessQuery = useQuery({
+    queryKey: ["teacher", "draft", lessonId, "publish-readiness", revision, approved],
+    queryFn: () => teacherApi.checkLessonPublish(lessonId, revision),
+    enabled: Boolean(draft),
+    staleTime: 0,
+    refetchOnMount: "always",
+  });
   const draftClassIds = Array.isArray(draft?.class_ids)
     ? draft.class_ids.filter((id): id is string => typeof id === "string")
     : typeof draft?.class_id === "string"
@@ -73,6 +102,10 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
   const completeArcIds = useMemo(
     () => completeBlueprintArcIds(matrix, problemByBankId),
     [matrix, problemByBankId],
+  );
+  const notices = useMemo(
+    () => normalizeContentNotices(draft?.mastery_notices ?? draft?.masteryNotices),
+    [draft],
   );
   const poolDeficitCount = matrix
     ? matrix.slots.filter((slot) => !slot.problem_id || !problemByBankId.has(slot.problem_id)).length
@@ -105,6 +138,15 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
     onSuccess: async () => { setError(""); setBlockers([]); await draftQuery.refetch(); },
     onError: async (completionError) => { setError(getApiErrorMessage(completionError, "Không thể bù bài còn thiếu.")); await draftQuery.refetch(); },
   });
+  const retryMissing = useMutation({
+    mutationFn: () => teacherApi.retryMissingLessonSlots(generationJobId),
+    onSuccess: (queued) => router.push(
+      `/teacher/lessons/generating/${encodeURIComponent(queued.jobId)}`,
+    ),
+    onError: (retryError) => setError(
+      getApiErrorMessage(retryError, "Chưa thể tạo tiếp các slot còn thiếu."),
+    ),
+  });
   const publish = useMutation({
     mutationFn: () => followUp ? teacherApi.publishFollowUpDraft(lessonId, revision) : teacherApi.publishCopilotDraft(lessonId, { classIds: selectedClassIds, deadline: new Date(deadline).toISOString(), title: title.trim(), expectedRevision: revision }),
     onSuccess: () => setPublished(true),
@@ -124,8 +166,9 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
     approve.isPending ||
     regenerate.isPending ||
     completePool.isPending ||
+    retryMissing.isPending ||
     publish.isPending;
-  const publishDisabled = reviewMutationPending || !approved || !hasCompleteArc || rejected.size > 0 || (!followUp && (selectedClassIds.length === 0 || !title.trim()));
+  const publishDisabled = reviewMutationPending || readinessQuery.isLoading || readinessQuery.data?.publishable !== true || !approved || !hasCompleteArc || rejected.size > 0 || (!followUp && (selectedClassIds.length === 0 || !title.trim()));
 
   return (
     <section className="lesson-immersive draft-review-page">
@@ -134,7 +177,7 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
         <span className={`review-state ${approved ? "approved" : "draft"}`}><ShieldCheck size={16} /> {approved ? `Đã duyệt · bản ${revision}` : `Bản nháp · bản ${revision}`}</span>
         <div>
           {rejected.size > 0 && <button className="secondary-button" onClick={() => regenerate.mutate()} disabled={reviewMutationPending}>{regenerate.isPending ? <CircleNotch className="animate-spin" size={16} /> : <ArrowsClockwise size={16} />} Soạn lại {rejected.size} câu</button>}
-          {poolDeficitCount > 0 && <button className="secondary-button" onClick={() => completePool.mutate()} disabled={reviewMutationPending}>{completePool.isPending ? <CircleNotch className="animate-spin" size={16} /> : <ArrowsClockwise size={16} />} Bù {poolDeficitCount} bài còn thiếu</button>}
+          {poolDeficitCount > 0 && <button className="secondary-button" onClick={() => generationJobId ? retryMissing.mutate() : completePool.mutate()} disabled={reviewMutationPending}>{completePool.isPending || retryMissing.isPending ? <CircleNotch className="animate-spin" size={16} /> : <ArrowsClockwise size={16} />} Bù {poolDeficitCount} bài còn thiếu</button>}
           {!approved && <button className="secondary-button" onClick={() => approve.mutate()} disabled={reviewMutationPending || !hasCompleteArc || rejected.size > 0}>{approve.isPending ? <CircleNotch className="animate-spin" size={16} /> : <Check size={16} />} Duyệt arc sẵn sàng</button>}
           <button className="primary-button" disabled={publishDisabled} onClick={() => publish.mutate()}><Check size={16} /> {publish.isPending ? "Đang xuất bản" : "Xuất bản"}</button>
         </div>
@@ -155,6 +198,7 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
             <p>{goal}</p>
           </header>
           {(error || blockers.length > 0) && <div className="publish-blockers"><WarningCircle size={22} /><div><strong>{error}</strong>{blockers.map((item, index) => <p key={index}>{blockerLabel(item)}</p>)}</div></div>}
+          {notices.length > 0 && <div className="publish-blockers" role="status"><WarningCircle size={22} /><div><strong>Nguồn bài và fallback</strong>{notices.map((notice, index) => <p key={`${notice.code}:${index}`}><b>{noticeLabel(notice.code)}</b>: {notice.detail || "Hãy kiểm tra các bài được đánh dấu trước khi xuất bản."}{notice.slotIds.length ? ` (${notice.slotIds.length} slot)` : ""}</p>)}</div></div>}
           {completePool.data?.failed_slots?.length ? <div className="publish-blockers"><WarningCircle size={22} /><div><strong>Một số slot chưa bù được</strong>{completePool.data.failed_slots.map((slot) => <p key={slot.slot_id}>{slot.slot_id}: {slot.reason}</p>)}</div></div> : null}
           {hasNonMasteryContent || !matrix ? <DraftReviewContent review={contentWithoutMastery} rejected={rejected} onToggle={(id) => setRejected((current) => toggleSet(current, id))} /> : null}
           {matrix ? <MasteryArcMatrix matrix={matrix} problems={problemByBankId} completeArcIds={completeArcIds} rejected={rejected} onToggle={(id) => setRejected((current) => toggleSet(current, id))} kind={kind} /> : null}
@@ -165,7 +209,7 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
           <section><h2>Độ phủ</h2><Coverage draft={draft} /></section>
           <BlueprintSummary draft={draft} completeArcCount={completeArcIds.length} missingSlotCount={poolDeficitCount} />
           <section><h2>Nguồn nội dung</h2><p>Kiến thức: {provenanceLabel((draft?.knowledge as Record<string, unknown> | undefined)?.provenance)}</p><p>Bài luyện tập: {provenanceLabel(draft?.mastery_provenance)}</p></section>
-          <section><h2>Kiểm soát chất lượng</h2><p>{rejected.size ? `${rejected.size} câu cần được soạn lại trước khi duyệt.` : approved ? "Toàn bộ nội dung ở bản hiện tại đã được duyệt." : "Đánh dấu Cần thay, hoặc duyệt toàn bộ bản nháp."}</p></section>
+          <section><h2>Kiểm soát chất lượng</h2><p>{rejected.size ? `${rejected.size} câu cần được soạn lại trước khi duyệt.` : approved ? readinessQuery.data?.publishable ? `${readinessQuery.data.publishable_arc_ids.length} arc đã qua gate xuất bản.` : "Bản nháp đã duyệt nhưng publish gate vẫn còn blocker." : "Đánh dấu Cần thay, hoặc duyệt toàn bộ bản nháp."}</p></section>
           <small>ID bản nháp: {lessonId}</small>
         </aside>
       </div>
@@ -216,7 +260,7 @@ function MasteryArcMatrix({
             <article key={arc.arc_id} className="mastery-arc-card" data-complete={complete}>
               <header>
                 <div>
-                  <span>Arc {index + 1}</span>
+                  <span>Arc {index + 1}{arc.difficulty_tier ? ` · ${tierLabel(arc.difficulty_tier)}` : ""}</span>
                   <h3>{complete ? "Sẵn sàng xuất bản" : "Còn thiếu slot"}</h3>
                 </div>
                 <b>{arcSlots.filter((slot) => slot?.problem_id && problems.has(slot.problem_id)).length}/4</b>
@@ -288,6 +332,9 @@ function buildBlueprintModel(value: Record<string, unknown> | null): BlueprintMo
   const arcs = Array.isArray(value.arcs)
     ? value.arcs.filter(isRecord).map((arc) => ({
       arc_id: String(arc.arc_id || ""),
+      difficulty_tier: ["easy", "medium", "hard"].includes(String(arc.difficulty_tier))
+        ? String(arc.difficulty_tier) as "easy" | "medium" | "hard"
+        : null,
       slot_ids: Array.isArray(arc.slot_ids) ? arc.slot_ids.map(String) : [],
     })).filter((arc) => arc.arc_id)
     : arcIds.map((arc_id) => ({ arc_id }));
@@ -312,6 +359,25 @@ function completeBlueprintArcIds(matrix: BlueprintModel | null, problems: Map<st
       return Boolean(slot?.problem_id && problems.has(slot.problem_id));
     }))
     .map((arc) => arc.arc_id);
+}
+
+function normalizeContentNotices(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.filter(isRecord).map((item) => ({
+    code: String(item.code || "content_notice"),
+    detail: typeof item.detail === "string" ? item.detail : "",
+    slotIds: Array.isArray(item.slot_ids) ? item.slot_ids.filter((id): id is string => typeof id === "string") : [],
+  }));
+}
+
+function noticeLabel(code: string) {
+  if (code === "ai_fallback_used" || code === "pool_completed_by_generation") return "AI đã lấp phần tài liệu còn thiếu";
+  if (code === "source_extraction_failed") return "Không đọc được một tài liệu nguồn";
+  if (code === "source_not_usable_for_slots") return "Tài liệu không tạo được bài đạt chuẩn";
+  if (code === "composed_from_source_structure") return "Biến thể dựa trên cấu trúc tài liệu";
+  if (code === "source_images_dropped") return "Công thức trong ảnh có thể bị bỏ sót";
+  if (code === "mastery_slots_missing") return "Ma trận còn thiếu slot";
+  return "Lưu ý nguồn nội dung";
 }
 
 function inferPosition(slotId: string) {
@@ -361,3 +427,4 @@ function defaultDeadline() { const date = new Date(Date.now() + 7 * 24 * 60 * 60
 function asRecord(value: unknown): Record<string, unknown> | null { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null; }
 function isRecord(value: unknown): value is Record<string, unknown> { return Boolean(asRecord(value)); }
 function readableSkill(value: string) { return (value.split("#").pop() || value).replace(/[-_]+/g, " "); }
+function tierLabel(tier: "easy" | "medium" | "hard") { return { easy: "Cơ bản", medium: "Vừa sức", hard: "Nâng cao" }[tier]; }

@@ -504,6 +504,7 @@ export interface LessonOneKnowledgeItem {
 export interface LessonOneQuestion {
   id?: string;
   type?: "mcq" | "multiple_choice" | "fill_in_the_blank" | "true_false" | string;
+  exercise_type?: "multiple_choice" | "fill_in_the_blank" | "true_false" | string;
   questionText?: string;
   question?: string;
   options?: Array<{ label?: string; text?: string } | string>;

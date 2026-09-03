@@ -367,7 +367,7 @@ function LessonPlanCard({ plan, classId }: { plan: CopilotLessonPlan; classId: s
       return waitForLessonGeneration(queued.jobId, setGenerationStep);
     },
     onSuccess: (result) => {
-      if (result.generationStatus === "partial") {
+      if (result.generationStatus === "partial_blocked" || result.generationStatus === "partial") {
         setPartial(result);
         return;
       }
