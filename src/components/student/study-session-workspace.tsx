@@ -136,7 +136,8 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
       total_problem_count: event.total_problem_count ?? current.total_problem_count,
     } : current);
     if (event.current_problem_id) setActiveProblemId(event.current_problem_id);
-    if (event.awaiting_reasoning) setUiState("awaiting_reasoning");
+    if (event.advanced || event.session_completed) setUiState("idle");
+    else if (event.awaiting_reasoning) setUiState("awaiting_reasoning");
     else if (event.needs_clarification) setUiState("clarifying");
     else if (event.spam) setUiState("farming");
     else setUiState("idle");
