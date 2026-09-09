@@ -13,6 +13,7 @@ Specification: `docs/LESSON_PDF_EXPORT_SPEC.md`
 - Added teacher-copy generate/status endpoints, frontend API methods, independent Draft Review actions, and two labeled document cards in Teacher Class view.
 - Teacher Class selects only student v2 and teacher v1 render contracts for the exact published revision. Student roadmap still does not query or return either artifact.
 - PDF renderer/artifact tests pass: 2 suites, 11 tests. The two Teacher Class artifact-routing tests pass independently. Frontend targeted ESLint and TypeScript checks pass. The PDF module contributes no current compile error; the repository-wide Nest build is presently blocked by 7 errors in unrelated in-progress `ai-session.service.ts` taxonomy work. The full backend suite is likewise blocked by unrelated taxonomy-version changes (7 suites / 15 tests failing, 25 suites / 216 tests passing).
+- Removed the duplicate frontend completeness gate after a real Draft Review showed PDF actions disabled while the matrix UI reported one missing problem. Export actions now defer canonical 12-problem validation to the backend, remain independent from review/publish mutations, and use unambiguous `Xuất PDF HS/GV` labels.
 
 ## Confirmed scope
 
