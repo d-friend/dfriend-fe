@@ -45,6 +45,13 @@ export interface DraftReviewModel {
   masteryProblems: ProblemView[];
 }
 
+export interface RegenerationGuidance {
+  reason: string;
+  requestedChange: string;
+}
+
+type RegenerationGuidanceByProblem = Record<string, RegenerationGuidance>;
+
 const emptyDraftReview: DraftReviewModel = { knowledgeSections: [], knowledgeProblems: [], masteryProblems: [] };
 const masteryRoleLabels: Record<string, string> = {
   reinforcement: "The Warm-Up · Chứng minh điều vừa học",
@@ -96,7 +103,8 @@ export function LessonAuthoring() {
   });
   const topics = useMemo(() => curriculum.data?.find((item) => item.value === subject)?.topics || [], [curriculum.data, subject]);
   const concepts = useMemo(() => topics.find((item) => item.value === topic)?.concepts || [], [topics, topic]);
-  const availableSkills = useQuery({ queryKey: ["curriculum", "skills", subject, topic, concept], queryFn: () => teacherApi.curriculumSkills(subject, topic, concept), enabled: Boolean(subject && topic && concept), staleTime: Infinity });
+  const taxonomyVersion = curriculum.data?.find((item) => item.value === subject)?.taxonomy_version;
+  const availableSkills = useQuery({ queryKey: ["curriculum", "skills", subject, topic, concept, taxonomyVersion], queryFn: () => teacherApi.curriculumSkills(subject, topic, concept, taxonomyVersion as number), enabled: Boolean(subject && topic && concept && taxonomyVersion), staleTime: Infinity });
   const studioReadyCount = [
     title.trim(),
     subject && topic && concept,
@@ -210,7 +218,7 @@ export function LessonAuthoring() {
         }
       }
     }
-    if (!title.trim() || !subject || !topic || !concept || !classIds.length || !selectedSkills.length) {
+    if (!title.trim() || !subject || !topic || !concept || !taxonomyVersion || !classIds.length || !selectedSkills.length) {
       setError("Điền tên bài, taxonomy, ít nhất một kỹ năng và một lớp.");
       return;
     }
@@ -224,12 +232,13 @@ export function LessonAuthoring() {
         upload.append("subject", subject);
         upload.append("topic", topic);
         upload.append("concept", concept);
+        upload.append("taxonomyVersion", String(taxonomyVersion));
         upload.append("shared", "true");
         const registered = await teacherApi.uploadDocument(upload);
         setFile(null);
-        await waitForDocumentIndex(registered.documentId);
+        await waitForDocumentIndex(registered.documentId, taxonomyVersion);
       }
-      const result = await teacherApi.precheckLesson({ title: title.trim(), lessonGoal: lessonGoal.trim(), subject, topic, concept, explicitSkillIds: selectedSkills });
+      const result = await teacherApi.precheckLesson({ title: title.trim(), lessonGoal: lessonGoal.trim(), subject, topic, concept, taxonomyVersion, explicitSkillIds: selectedSkills });
       if (lessonKind === "targeted_review") {
         if (selectedSkills.length < 2) {
           setError("Mục tiêu ôn tập cần nhận diện ít nhất hai kỹ năng trong cùng khái niệm.");
@@ -274,6 +283,7 @@ export function LessonAuthoring() {
       form1.append("subject", subject);
       form1.append("topic", topic);
       form1.append("concept", concept);
+      form1.append("taxonomyVersion", String(taxonomyVersion));
       form1.append("lessonKind", lessonKind);
       form1.append("explicitSkillIds", JSON.stringify(lessonKind === "targeted_review" ? reviewSkills : selectedSkills));
       form1.append("classIds", JSON.stringify(classIds));
@@ -339,7 +349,7 @@ export function LessonAuthoring() {
     await teacherApi.generateLesson2(form2);
     setActiveJobId("");
     if (storageKey) window.localStorage.removeItem(storageKey);
-    router.push(`/teacher/lessons/${nextLessonId}/review`);
+    router.push(`/teacher/lessons/${nextLessonId}/review?taxonomyVersion=${taxonomyVersion}`);
   }
 
   return (
@@ -454,25 +464,52 @@ export function LessonAuthoring() {
   );
 }
 
-export function DraftProblemList({ problems, rejected, onToggle }: { problems: ProblemView[]; rejected: Set<string>; onToggle: (id: string) => void }) {
+export function DraftProblemList({
+  problems,
+  rejected,
+  guidance,
+  onToggle,
+  onGuidanceChange,
+}: {
+  problems: ProblemView[];
+  rejected: Set<string>;
+  guidance: RegenerationGuidanceByProblem;
+  onToggle: (id: string) => void;
+  onGuidanceChange: (id: string, field: keyof RegenerationGuidance, value: string) => void;
+}) {
   if (!problems.length) return <div className="list-empty"><Lightbulb size={26} /><h3>Chưa tìm thấy danh sách bài</h3><p>Bản nháp có thể cần được tạo lại.</p></div>;
-  return <div className="draft-problem-list">{problems.map((problem, index) => <article key={problem.id} data-rejected={rejected.has(problem.id)}><header><span>{String(index + 1).padStart(2, "0")}</span><div><strong>{problem.role ? masteryRoleLabels[problem.role] || problem.role : "Bài luyện tập"}</strong><small>{problem.skill || "Theo mục tiêu bài học"}</small>{problemSourceLabel(problem) && <small className="problem-origin">{problemSourceLabel(problem)}</small>}</div><button className={rejected.has(problem.id) ? "secondary-button" : "text-button"} onClick={() => onToggle(problem.id)}>{rejected.has(problem.id) ? "Giữ lại" : "Cần thay"}</button></header><MathContent>{problem.prompt}</MathContent>{problem.choices?.length ? <ol type="A">{problem.choices.map((choice, choiceIndex) => <li key={`${problem.id}:${choiceIndex}`}><MathContent answer>{choice}</MathContent></li>)}</ol> : null}{problem.answer ? <div className="draft-answer"><span>Đáp án</span><MathContent answer>{problem.answer}</MathContent></div> : null}{problem.solution ? <details className="draft-solution"><summary>Xem lời giải Copilot sẽ dùng</summary><MathContent>{problem.solution}</MathContent></details> : null}</article>)}</div>;
+  return <div className="draft-problem-list">{problems.map((problem, index) => {
+    const needsReplacement = rejected.has(problem.id);
+    const itemGuidance = guidance[problem.id] || { reason: "", requestedChange: "" };
+    return <article key={problem.id} data-rejected={needsReplacement}>
+      <header><span>{String(index + 1).padStart(2, "0")}</span><div><strong>{problem.role ? masteryRoleLabels[problem.role] || problem.role : "Bài luyện tập"}</strong><small>{problem.skill || "Theo mục tiêu bài học"}</small>{problemSourceLabel(problem) && <small className="problem-origin">{problemSourceLabel(problem)}</small>}</div><button className={needsReplacement ? "secondary-button" : "text-button"} onClick={() => onToggle(problem.id)}>{needsReplacement ? "Giữ lại" : "Cần thay"}</button></header>
+      <MathContent>{problem.prompt}</MathContent>
+      {problem.choices?.length ? <ol type="A">{problem.choices.map((choice, choiceIndex) => <li key={`${problem.id}:${choiceIndex}`}><MathContent answer>{choice}</MathContent></li>)}</ol> : null}
+      {problem.answer ? <div className="draft-answer"><span>Đáp án</span><MathContent answer>{problem.answer}</MathContent></div> : null}
+      {problem.solution ? <details className="draft-solution"><summary>Xem lời giải Copilot sẽ dùng</summary><MathContent>{problem.solution}</MathContent></details> : null}
+      {needsReplacement ? <div className="regeneration-guidance">
+        <p>Gợi ý riêng cho câu thay thế</p>
+        <label><span>Vì sao cần thay? <small>Không bắt buộc</small></span><textarea value={itemGuidance.reason} onChange={(event) => onGuidanceChange(problem.id, "reason", event.target.value)} maxLength={1000} rows={2} placeholder="Ví dụ: câu hỏi quá giống ví dụ đã học." /></label>
+        <label><span>Muốn thay đổi như thế nào? <small>Không bắt buộc</small></span><textarea value={itemGuidance.requestedChange} onChange={(event) => onGuidanceChange(problem.id, "requestedChange", event.target.value)} maxLength={1000} rows={2} placeholder="Ví dụ: đổi ngữ cảnh, giữ nguyên kỹ năng và độ khó." /></label>
+      </div> : null}
+    </article>;
+  })}</div>;
 }
 
-export function DraftReviewContent({ review, rejected, onToggle }: { review: DraftReviewModel; rejected: Set<string>; onToggle: (id: string) => void }) {
+export function DraftReviewContent({ review, rejected, guidance, onToggle, onGuidanceChange }: { review: DraftReviewModel; rejected: Set<string>; guidance: RegenerationGuidanceByProblem; onToggle: (id: string) => void; onGuidanceChange: (id: string, field: keyof RegenerationGuidance, value: string) => void }) {
   const hasContent = review.knowledgeSections.length || review.knowledgeProblems.length || review.masteryProblems.length;
   if (!hasContent) return <div className="list-empty"><Lightbulb size={26} /><h3>Bản nháp chưa có nội dung</h3><p>Thử tạo lại bài học để tải đủ phần kiến thức và luyện tập.</p></div>;
   return <div className="draft-review-content">
     {review.knowledgeSections.length > 0 && <section id="session-1-knowledge" className="draft-review-section"><header><div><span>Session 1</span><h2>Nội dung kiến thức</h2></div><small>{review.knowledgeSections.length} phần</small></header><div className="draft-knowledge-list">{review.knowledgeSections.map((section, index) => <article key={section.id}><span>Phần {String(index + 1).padStart(2, "0")}</span><h3>{section.title}</h3><MathContent>{section.content}</MathContent></article>)}</div></section>}
-    {review.knowledgeProblems.length > 0 && <section id="session-1-checkpoints" className="draft-review-section"><header><div><span>Session 1</span><h2>Câu kiểm tra kiến thức</h2></div><small>{review.knowledgeProblems.length} câu</small></header><DraftProblemList problems={review.knowledgeProblems} rejected={rejected} onToggle={onToggle} /></section>}
-    {review.masteryProblems.length > 0 && <section id="session-2-mastery" className="draft-review-section"><header><div><span>Session 2</span><h2>Bài luyện tập mastery</h2></div><small>{review.masteryProblems.length} bài</small></header><DraftProblemList problems={review.masteryProblems} rejected={rejected} onToggle={onToggle} /></section>}
+    {review.knowledgeProblems.length > 0 && <section id="session-1-checkpoints" className="draft-review-section"><header><div><span>Session 1</span><h2>Câu kiểm tra kiến thức</h2></div><small>{review.knowledgeProblems.length} câu</small></header><DraftProblemList problems={review.knowledgeProblems} rejected={rejected} guidance={guidance} onToggle={onToggle} onGuidanceChange={onGuidanceChange} /></section>}
+    {review.masteryProblems.length > 0 && <section id="session-2-mastery" className="draft-review-section"><header><div><span>Session 2</span><h2>Bài luyện tập mastery</h2></div><small>{review.masteryProblems.length} bài</small></header><DraftProblemList problems={review.masteryProblems} rejected={rejected} guidance={guidance} onToggle={onToggle} onGuidanceChange={onGuidanceChange} /></section>}
   </div>;
 }
 
-async function waitForDocumentIndex(documentId: string) {
+async function waitForDocumentIndex(documentId: string, taxonomyVersion: number) {
   const timeoutAt = Date.now() + 120_000;
   while (Date.now() < timeoutAt) {
-    const document = (await teacherApi.documents()).find(
+    const document = (await teacherApi.documents(taxonomyVersion)).find(
       (item) => item.documentId === documentId,
     );
     if (document?.indexStatus === "ready") return;
@@ -507,6 +544,7 @@ export function normalizeProblems(value: unknown, namespace = "problem"): Proble
     };
   });
 }
+
 export function normalizeDraftReview(value: unknown): DraftReviewModel {
   const draft = asRecord(value);
   if (!draft) return emptyDraftReview;
@@ -522,15 +560,23 @@ export function normalizeDraftReview(value: unknown): DraftReviewModel {
     masteryProblems: normalizeProblems(nestedMasteryProblems.length ? nestedMasteryProblems : topLevelProblems, "mastery"),
   };
 }
-export function buildRegenerationTargets(review: DraftReviewModel, rejected: Set<string>) {
-  const targets: Array<{ kind: "mastery" | "knowledge_checkpoint"; id?: string; index?: number }> = [];
+export function buildRegenerationTargets(review: DraftReviewModel, rejected: Set<string>, guidance: RegenerationGuidanceByProblem = {}) {
+  const targets: Array<{ kind: "mastery" | "knowledge_checkpoint"; id?: string; index?: number; reason?: string; requestedChange?: string }> = [];
+  const withGuidance = (problemId: string) => {
+    const reason = guidance[problemId]?.reason.trim();
+    const requestedChange = guidance[problemId]?.requestedChange.trim();
+    return {
+      ...(reason ? { reason } : {}),
+      ...(requestedChange ? { requestedChange } : {}),
+    };
+  };
   review.knowledgeProblems.forEach((problem, index) => {
-    if (rejected.has(problem.id)) targets.push({ kind: "knowledge_checkpoint", index });
+    if (rejected.has(problem.id)) targets.push({ kind: "knowledge_checkpoint", index, ...withGuidance(problem.id) });
   });
   review.masteryProblems.forEach((problem) => {
     if (!rejected.has(problem.id)) return;
     const bankId = problem.source?.bank_problem_id;
-    if (typeof bankId === "string" && bankId) targets.push({ kind: "mastery", id: bankId });
+    if (typeof bankId === "string" && bankId) targets.push({ kind: "mastery", id: bankId, ...withGuidance(problem.id) });
   });
   return targets;
 }

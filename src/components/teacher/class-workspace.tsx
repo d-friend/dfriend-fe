@@ -5,12 +5,15 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
+  ArrowSquareOut,
   BookOpenText,
   Check,
   CheckCircle,
   ClipboardText,
   ClockCounterClockwise,
   Copy,
+  DownloadSimple,
+  FilePdf,
   Files,
   GraduationCap,
   MagnifyingGlass,
@@ -341,10 +344,29 @@ function ActivityList({ items }: { items: Array<{ id?: string; eventType?: strin
 }
 
 function LessonDetail({ lesson, studentCount }: { lesson: TeacherRoadmapItem | undefined; studentCount: number }) {
+  const pdfAccess = useMutation({
+    mutationFn: ({ artifactId, disposition }: { artifactId: string; disposition: "inline" | "attachment" }) => {
+      return teacherApi.accessLessonPdf(artifactId, disposition);
+    },
+    onSuccess: ({ url }, { disposition }) => {
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.target = disposition === "inline" ? "_blank" : "_self";
+      anchor.rel = "noopener noreferrer";
+      if (disposition === "attachment") anchor.download = "";
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+    },
+  });
   if (!lesson) return <DetailEmpty tab="learning-path" />;
   const incomplete = Math.max(studentCount - lesson.completedCount, 0);
   const hook = lessonHook(lesson);
-  return <div className="detail-content"><p className="workspace-kicker">Chi tiết bài học</p><h2>{lesson.title}</h2><div className="metric-grid two"><div><span>Đã hoàn thành</span><strong>{lesson.completedCount}</strong><small>/{studentCount}</small></div><div><span>Chưa hoàn thành</span><strong>{incomplete}</strong><small>học sinh</small></div></div><section className="detail-section"><h3>Nội dung</h3>{hook?.trim() && <div className="knowledge-hook"><strong>Hook bài học</strong><MathContent>{hook}</MathContent></div>}<div className="lesson-facts"><div><span>Số câu hỏi</span><strong>{lesson.questionsCount}</strong></div><div><span>Trạng thái</span><strong>Đang mở</strong></div><div><span>Deadline</span><strong>{formatDate(lesson.deadline)}</strong></div></div></section></div>;
+  const pdfArtifacts = [
+    { label: "Bản học sinh", artifact: lesson.pdfArtifact },
+    { label: "Bản giáo viên · có đáp án", artifact: lesson.teacherPdfArtifact },
+  ].filter((item): item is { label: string; artifact: NonNullable<TeacherRoadmapItem["pdfArtifact"]> } => Boolean(item.artifact));
+  return <div className="detail-content"><p className="workspace-kicker">Chi tiết bài học</p><h2>{lesson.title}</h2><div className="metric-grid two"><div><span>Đã hoàn thành</span><strong>{lesson.completedCount}</strong><small>/{studentCount}</small></div><div><span>Chưa hoàn thành</span><strong>{incomplete}</strong><small>học sinh</small></div></div><section className="detail-section"><h3>Nội dung</h3>{hook?.trim() && <div className="knowledge-hook"><strong>Hook bài học</strong><MathContent>{hook}</MathContent></div>}<div className="lesson-facts"><div><span>Số câu hỏi</span><strong>{lesson.questionsCount}</strong></div><div><span>Trạng thái</span><strong>Đang mở</strong></div><div><span>Deadline</span><strong>{formatDate(lesson.deadline)}</strong></div></div></section>{pdfArtifacts.map(({ label, artifact }) => <section className="detail-section lesson-pdf-card" key={artifact.artifactId}><div className="lesson-pdf-icon"><FilePdf size={24} weight="fill" /></div><div className="lesson-pdf-copy"><h3>{label}</h3><strong>{artifact.filename}</strong><small>PDF · Bản {artifact.contentRevision} · {formatDate(artifact.createdAt, true)}</small>{pdfAccess.isError ? <span className="lesson-pdf-error">{getApiErrorMessage(pdfAccess.error, "Không thể mở PDF.")}</span> : null}</div><div className="lesson-pdf-actions"><button className="secondary-button" disabled={pdfAccess.isPending} onClick={() => pdfAccess.mutate({ artifactId: artifact.artifactId, disposition: "inline" })}><ArrowSquareOut size={16} /> Mở PDF</button><button className="text-button" disabled={pdfAccess.isPending} onClick={() => pdfAccess.mutate({ artifactId: artifact.artifactId, disposition: "attachment" })}><DownloadSimple size={16} /> Tải xuống</button></div></section>)}</div>;
 }
 
 function lessonHook(lesson: TeacherRoadmapItem) {
@@ -445,7 +467,7 @@ function ReportDetailInner({ summary, classId, completedCount, studentCount }: {
     },
     onSuccess: (data) => queryClient.setQueryData(["teacher", "copilot", reportId, "decision"], data),
   });
-  const skillLabels = useQuery({ queryKey: ["curriculum", "skills", report.data?.subject, report.data?.topic, report.data?.concept], queryFn: () => teacherApi.curriculumSkills(report.data?.subject || "", report.data?.topic || "", report.data?.concept || ""), enabled: Boolean(report.data?.subject && report.data?.topic && report.data?.concept), staleTime: Infinity });
+  const skillLabels = useQuery({ queryKey: ["curriculum", "skills", report.data?.subject, report.data?.topic, report.data?.concept, report.data?.taxonomyVersion], queryFn: () => teacherApi.curriculumSkills(report.data?.subject || "", report.data?.topic || "", report.data?.concept || "", report.data?.taxonomyVersion as number), enabled: Boolean(report.data?.subject && report.data?.topic && report.data?.concept && report.data?.taxonomyVersion), staleTime: Infinity });
   const runReport = useMutation({
     mutationFn: async () => {
       if (!summary?.publicationId) throw new Error("Báo cáo chưa gắn với publication.");

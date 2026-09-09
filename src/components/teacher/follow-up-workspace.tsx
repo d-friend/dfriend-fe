@@ -39,6 +39,7 @@ export function FollowUpWorkspace({ lessonId }: { lessonId: string }) {
         planId: plan.data.planId,
         kind,
         conceptKey: lane.concept_key,
+        taxonomyVersion: plan.data.taxonomyVersion,
         studentIds: lane.target_student_ids || [],
         skillIds: selected,
         lessonGoal: laneState[laneKey]?.lessonGoal || "",
@@ -47,7 +48,7 @@ export function FollowUpWorkspace({ lessonId }: { lessonId: string }) {
       });
       if (result.draft) {
         setCreatedByKind((current) => ({ ...current, [kind]: result.draft }));
-        reviewTab.location.replace(`/teacher/lessons/${result.draft.aiLessonId}/review`);
+        reviewTab.location.replace(`/teacher/lessons/${result.draft.aiLessonId}/review?taxonomyVersion=${result.draft.taxonomyVersion}`);
         return;
       }
       if (!result.jobId) {
@@ -173,7 +174,7 @@ export function FollowUpWorkspace({ lessonId }: { lessonId: string }) {
               error={laneErrors[laneKey]}
               onStateChange={(next) => setLaneState((current) => ({ ...current, [laneKey]: next }))}
               onConfirm={() => createOne(lane, laneKey)}
-              onOpen={(draft) => window.open(`/teacher/lessons/${draft.aiLessonId}/review`, "_blank", "noopener,noreferrer")}
+              onOpen={(draft) => window.open(`/teacher/lessons/${draft.aiLessonId}/review?taxonomyVersion=${draft.taxonomyVersion}`, "_blank", "noopener,noreferrer")}
               onOpenJob={(jobId) => window.open(generationRoute(jobId, kind), "_blank", "noopener,noreferrer")}
             />;
           })}
@@ -220,8 +221,8 @@ function FollowUpLane({
   const kind = lane.kind as LaneKind;
   const parsed = parseConceptKey(lane?.concept_key || "");
   const skills = useQuery({
-    queryKey: ["curriculum", "skills", parsed?.subject, parsed?.topic, parsed?.concept],
-    queryFn: () => teacherApi.curriculumSkills(parsed?.subject || "", parsed?.topic || "", parsed?.concept || ""),
+    queryKey: ["curriculum", "skills", parsed?.subject, parsed?.topic, parsed?.concept, plan.taxonomyVersion],
+    queryFn: () => teacherApi.curriculumSkills(parsed?.subject || "", parsed?.topic || "", parsed?.concept || "", plan.taxonomyVersion),
     enabled: Boolean(parsed),
     staleTime: Infinity,
   });

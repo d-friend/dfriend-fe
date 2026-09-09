@@ -17,6 +17,7 @@ import type {
   TeacherReportEffect,
   CurriculumSubject,
   ExerciseDocument,
+  LessonPdfArtifact,
   ProductEventPage,
   StudentInClass,
   TeacherClass,
@@ -88,6 +89,7 @@ export interface FollowUpSuggestion {
 }
 
 export interface FollowUpPlan {
+  taxonomyVersion: number;
   class_id: string;
   lesson_id: string;
   source_concept_key: string;
@@ -111,6 +113,7 @@ export interface FollowUpDraftHandle {
   exercises: Array<Record<string, unknown>>;
   summary: string;
   aiLessonId: string;
+  taxonomyVersion: number;
   publicationId?: string;
   classId?: string;
   sourceReportId?: string;
@@ -327,7 +330,7 @@ export const teacherApi = {
       )
     ).data,
   chatCopilot: async (
-    payload: { message: string; conversation_id?: string | null; class_id?: string | null },
+    payload: { message: string; taxonomyVersion: number; conversation_id?: string | null; class_id?: string | null },
     signal?: AbortSignal,
   ) =>
     (
@@ -337,7 +340,7 @@ export const teacherApi = {
       })
     ).data,
   confirmCopilotPlan: async (
-    payload: { classId: string; goalText: string; conceptKey: string; skillIds: string[]; allowGenerated?: boolean; requestId?: string },
+    payload: { classId: string; goalText: string; conceptKey: string; taxonomyVersion: number; skillIds: string[]; allowGenerated?: boolean; requestId?: string },
   ) =>
     (
       await apiClient.post<{ jobId: string; generationRunId: string; status: "queued" }>(
@@ -358,12 +361,13 @@ export const teacherApi = {
   curriculum: async () =>
     (await apiClient.get<{ subjects: CurriculumSubject[] }>("/exercises/curriculum")).data
       .subjects,
-  curriculumSkills: async (subject: string, topic: string, concept: string) =>
-    (await apiClient.get<{ skills: Array<{ skill_id: string; label_vi: string }> }>("/exercises/curriculum/skills", { params: { subject, topic, concept } })).data.skills,
-  documents: async () =>
+  curriculumSkills: async (subject: string, topic: string, concept: string, taxonomyVersion: number) =>
+    (await apiClient.get<{ skills: Array<{ skill_id: string; label_vi: string }> }>("/exercises/curriculum/skills", { params: { subject, topic, concept, taxonomyVersion } })).data.skills,
+  documents: async (taxonomyVersion: number) =>
     (
       await apiClient.get<{ documents: ExerciseDocument[] }>(
         "/exercises/documents/mine",
+        { params: { taxonomyVersion } },
       )
     ).data.documents,
   uploadDocument: async (body: FormData) =>
@@ -374,16 +378,17 @@ export const teacherApi = {
         { timeout: 120_000 },
       )
     ).data,
-  deleteDocument: async (documentId: string) =>
-    apiClient.delete(`/exercises/documents/${documentId}`),
-  retryDocumentIndex: async (documentId: string) =>
-    (await apiClient.post<{ documentId: string; indexStatus: string }>(`/exercises/documents/${documentId}/retry-index`)).data,
+  deleteDocument: async (documentId: string, taxonomyVersion: number) =>
+    apiClient.delete(`/exercises/documents/${documentId}`, { params: { taxonomyVersion } }),
+  retryDocumentIndex: async (documentId: string, taxonomyVersion: number) =>
+    (await apiClient.post<{ documentId: string; indexStatus: string }>(`/exercises/documents/${documentId}/retry-index`, undefined, { params: { taxonomyVersion } })).data,
   precheckLesson: async (payload: {
     lessonGoal?: string;
     title: string;
     subject: string;
     topic: string;
     concept: string;
+    taxonomyVersion: number;
     explicitSkillIds?: string[];
   }) =>
     (
@@ -431,63 +436,120 @@ export const teacherApi = {
         payload,
       )
     ).data,
-  copilotDraft: async (lessonId: string) =>
+  copilotDraft: async (lessonId: string, taxonomyVersion: number) =>
     (
       await apiClient.get<Record<string, unknown>>(
-        `/teacher/copilot/drafts/${lessonId}`,
+        `/teacher/copilot/drafts/${lessonId}?taxonomyVersion=${taxonomyVersion}`,
       )
     ).data,
-  approveGenerated: async (lessonId: string, expectedRevision: number) =>
+  lessonPdfArtifact: async (
+    lessonId: string,
+    revision: number,
+    taxonomyVersion: number,
+  ) =>
+    (
+      await apiClient.get<LessonPdfArtifact | null>(
+        `/teacher/lessons/${lessonId}/artifacts/full-content-pdf`,
+        { params: { revision, taxonomyVersion } },
+      )
+    ).data,
+  generateLessonPdf: async (
+    lessonId: string,
+    expectedRevision: number,
+    taxonomyVersion: number,
+  ) =>
+    (
+      await apiClient.post<LessonPdfArtifact>(
+        `/teacher/lessons/${lessonId}/artifacts/full-content-pdf`,
+        { expectedRevision, taxonomyVersion },
+        { timeout: 120_000 },
+      )
+    ).data,
+  teacherLessonPdfArtifact: async (
+    lessonId: string,
+    revision: number,
+    taxonomyVersion: number,
+  ) =>
+    (
+      await apiClient.get<LessonPdfArtifact | null>(
+        `/teacher/lessons/${lessonId}/artifacts/teacher-full-content-pdf`,
+        { params: { revision, taxonomyVersion } },
+      )
+    ).data,
+  generateTeacherLessonPdf: async (
+    lessonId: string,
+    expectedRevision: number,
+    taxonomyVersion: number,
+  ) =>
+    (
+      await apiClient.post<LessonPdfArtifact>(
+        `/teacher/lessons/${lessonId}/artifacts/teacher-full-content-pdf`,
+        { expectedRevision, taxonomyVersion },
+        { timeout: 120_000 },
+      )
+    ).data,
+  accessLessonPdf: async (
+    artifactId: string,
+    disposition: "inline" | "attachment",
+  ) =>
+    (
+      await apiClient.post<{ url: string; expiresInSeconds: number }>(
+        `/teacher/lessons/artifacts/${artifactId}/access`,
+        { disposition },
+      )
+    ).data,
+  approveGenerated: async (lessonId: string, expectedRevision: number, taxonomyVersion: number) =>
     (
       await apiClient.post<Record<string, unknown>>(
         `/exercises/ai-drafts/${lessonId}/approve-generated`,
-        { expectedRevision },
+        { expectedRevision, taxonomyVersion },
       )
     ).data,
-  approveLessonReview: async (lessonId: string, expectedRevision: number) =>
+  approveLessonReview: async (lessonId: string, expectedRevision: number, taxonomyVersion: number) =>
     (
       await apiClient.post<Record<string, unknown>>(
         `/exercises/ai-drafts/${lessonId}/review/approve`,
-        { expectedRevision },
+        { expectedRevision, taxonomyVersion },
       )
     ).data,
-  reopenLessonReview: async (lessonId: string, expectedRevision: number) =>
+  reopenLessonReview: async (lessonId: string, expectedRevision: number, taxonomyVersion: number) =>
     (
       await apiClient.post<Record<string, unknown>>(
         `/exercises/ai-drafts/${lessonId}/review/reopen`,
-        { expectedRevision },
+        { expectedRevision, taxonomyVersion },
       )
     ).data,
-  completeLessonReviewPool: async (lessonId: string, expectedRevision: number) =>
+  completeLessonReviewPool: async (lessonId: string, expectedRevision: number, taxonomyVersion: number) =>
     (
       await apiClient.post<CompletePoolResult>(
         `/exercises/ai-drafts/${lessonId}/review/complete-pool`,
-        { expectedRevision },
+        { expectedRevision, taxonomyVersion },
         { timeout: 360_000 },
       )
     ).data,
   regenerateLessonReview: async (
     lessonId: string,
-    targets: Array<{ kind: "mastery" | "knowledge_checkpoint"; id?: string; index?: number }>,
+    targets: Array<{ kind: "mastery" | "knowledge_checkpoint"; id?: string; index?: number; reason?: string; requestedChange?: string }>,
     expectedRevision: number,
+    taxonomyVersion: number,
   ) =>
     (
       await apiClient.post<Record<string, unknown>>(
         `/exercises/ai-drafts/${lessonId}/review/regenerate`,
-        { targets, expectedRevision },
+        { targets, expectedRevision, taxonomyVersion },
         { timeout: 360_000 },
       )
     ).data,
-  checkLessonPublish: async (lessonId: string, expectedRevision: number) =>
+  checkLessonPublish: async (lessonId: string, expectedRevision: number, taxonomyVersion: number) =>
     (
       await apiClient.post<PublishReadiness>(
         `/exercises/ai-drafts/${lessonId}/publish-check`,
-        { expectedRevision },
+        { expectedRevision, taxonomyVersion },
       )
     ).data,
   publishCopilotDraft: async (
     lessonId: string,
-    payload: { classIds: string[]; deadline?: string; title?: string; expectedRevision: number },
+    payload: { classIds: string[]; deadline?: string; title?: string; expectedRevision: number; taxonomyVersion: number },
   ) =>
     (
       await apiClient.post<Record<string, unknown>>(
@@ -495,11 +557,11 @@ export const teacherApi = {
         payload,
       )
     ).data,
-  publishFollowUpDraft: async (aiLessonId: string, expectedRevision: number) =>
+  publishFollowUpDraft: async (aiLessonId: string, expectedRevision: number, taxonomyVersion: number) =>
     (
       await apiClient.post<Record<string, unknown>>(
         `/teacher/copilot/extra-exercises/${aiLessonId}/publish`,
-        { expectedRevision },
+        { expectedRevision, taxonomyVersion },
       )
     ).data,
   generateFollowUps: async (lessonId: string) =>
@@ -532,6 +594,7 @@ export const teacherApi = {
       conceptKey: string;
       studentIds: string[];
       skillIds: string[];
+      taxonomyVersion: number;
       lessonGoal?: string;
       editedRecommendation?: boolean;
       requestId?: string;

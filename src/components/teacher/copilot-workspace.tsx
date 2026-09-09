@@ -56,6 +56,9 @@ export function CopilotWorkspace({ conversationId }: { conversationId?: string }
   const composerRef = useRef<HTMLTextAreaElement>(null);
 
   const classesQuery = useQuery({ queryKey: ["teacher", "classes"], queryFn: teacherApi.classes });
+  const curriculumQuery = useQuery({ queryKey: ["curriculum"], queryFn: teacherApi.curriculum, staleTime: 5 * 60 * 1000 });
+  const taxonomyVersions = Array.from(new Set((curriculumQuery.data || []).map((item) => item.taxonomy_version)));
+  const taxonomyVersion = taxonomyVersions.length === 1 ? taxonomyVersions[0] : undefined;
   const conversationQuery = useQuery({
     queryKey: ["teacher", "copilot", "conversation", conversationId],
     queryFn: () => teacherApi.conversation(conversationId as string),
@@ -104,12 +107,12 @@ export function CopilotWorkspace({ conversationId }: { conversationId?: string }
     },
   });
 
-  const canSend = message.trim().length > 0 && !sending;
+  const canSend = message.trim().length > 0 && !sending && Boolean(taxonomyVersion);
 
   async function send(event?: FormEvent, preset?: string) {
     event?.preventDefault();
     const content = (preset || message).trim();
-    if (!content || sending) return;
+    if (!content || sending || !taxonomyVersion) return;
     setMessage("");
     setSending(true);
     const userTurn: DisplayTurn = { id: crypto.randomUUID(), role: "user", content };
@@ -126,7 +129,7 @@ export function CopilotWorkspace({ conversationId }: { conversationId?: string }
       let resolvedConversation = activeConversationId;
       let streamError = "";
       await streamCopilot(
-        { message: content, conversation_id: activeConversationId || null, class_id: classId || null },
+        { message: content, taxonomyVersion, conversation_id: activeConversationId || null, class_id: classId || null },
         (streamEvent) => {
           if (streamEvent.type === "conversation") {
             resolvedConversation = streamEvent.conversation_id;
@@ -340,6 +343,7 @@ function LessonPlanCard({ plan, classId }: { plan: CopilotLessonPlan; classId: s
         classId,
         goalText: plan.goalText,
         conceptKey: plan.conceptKey,
+        taxonomyVersion: plan.taxonomyVersion,
         skillIds: Array.from(selected),
         allowGenerated,
         requestId,
@@ -373,7 +377,7 @@ function LessonPlanCard({ plan, classId }: { plan: CopilotLessonPlan; classId: s
       }
       setPartial(null);
       const lessonId = String(result.lessonId || "");
-      if (lessonId) router.push(`/teacher/lessons/${lessonId}/review`);
+      if (lessonId && result.taxonomyVersion) router.push(`/teacher/lessons/${lessonId}/review?taxonomyVersion=${result.taxonomyVersion}`);
     },
   });
 
@@ -411,7 +415,7 @@ function LessonPlanCard({ plan, classId }: { plan: CopilotLessonPlan; classId: s
             <button
               className="secondary-button"
               type="button"
-              onClick={() => router.push(`/teacher/lessons/${String(partial.lessonId)}/review`)}
+              onClick={() => router.push(`/teacher/lessons/${String(partial.lessonId)}/review?taxonomyVersion=${String(partial.taxonomyVersion)}`)}
             >
               <BookOpenText size={16} /> Review
             </button>
@@ -492,7 +496,7 @@ function ToolSteps({ steps }: { steps: CopilotStep[] }) {
 
 function DraftCard({ draft }: { draft: CopilotDraft }) {
   return (
-    <Link href={`/teacher/lessons/${draft.lessonId}/review`} className="draft-card">
+    <Link href={`/teacher/lessons/${draft.lessonId}/review?taxonomyVersion=${draft.taxonomyVersion}`} className="draft-card">
       <span className="draft-icon"><Sparkle size={18} weight="fill" /></span>
       <span><strong>Bản nháp bài học đã sẵn sàng</strong><small>{draft.problemCount} bài tập, cần giáo viên review</small></span>
       <ArrowUp size={17} className="rotate-45" />

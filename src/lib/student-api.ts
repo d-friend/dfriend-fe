@@ -23,7 +23,8 @@ export const studentKeys = {
   exercise: (exerciseId: string) => ["student", "exercise", exerciseId] as const,
   sessionOneProgress: (exerciseId: string) =>
     ["student", "session-one-progress", exerciseId] as const,
-  activeSession: (lessonId: string) => ["student", "session", lessonId] as const,
+  activeSession: (lessonId: string, taxonomyVersion: number) =>
+    ["student", "session", lessonId, taxonomyVersion] as const,
   report: (lessonId: string) => ["student", "report", lessonId] as const,
 };
 
@@ -66,19 +67,31 @@ export const studentApi = {
         progress,
       )
     ).data,
-  activeSession: async (lessonId: string) =>
-    (await apiClient.get<StudySession>(`/ai-session/active/${lessonId}`)).data,
-  startSession: async (lessonId: string, reset = false) =>
-    (await apiClient.post<StudySession>("/ai-session/start", { lessonId, reset })).data,
+  activeSession: async (lessonId: string, taxonomyVersion: number) =>
+    (
+      await apiClient.get<StudySession>(`/ai-session/active/${lessonId}`, {
+        params: { taxonomyVersion },
+      })
+    ).data,
+  startSession: async (lessonId: string, taxonomyVersion: number, reset = false) =>
+    (
+      await apiClient.post<StudySession>("/ai-session/start", {
+        lessonId,
+        taxonomyVersion,
+        reset,
+      })
+    ).data,
   closeSession: async (
     sessionId: string,
     lessonId: string,
+    taxonomyVersion: number,
     options?: { finishEarly?: boolean },
   ) =>
     (
       await apiClient.post<StudySessionSummary>("/ai-session/close", {
         sessionId,
         lessonId,
+        taxonomyVersion,
         ...(options?.finishEarly ? { finishEarly: true } : {}),
       })
     ).data,

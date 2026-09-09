@@ -21,7 +21,7 @@ function readCookie(name: string) {
 }
 
 export async function streamCopilot(
-  payload: { message: string; conversation_id?: string | null; class_id?: string | null },
+  payload: { message: string; taxonomyVersion: number; conversation_id?: string | null; class_id?: string | null },
   onEvent: (event: CopilotStreamEvent) => void,
   signal: AbortSignal,
 ) {

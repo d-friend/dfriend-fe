@@ -36,7 +36,8 @@ export function LessonGenerationJobWorkspace({ jobId }: { jobId: string }) {
           return;
         }
         const lessonId = String(result.lessonId || "");
-        if (!lessonId) throw new Error("Backend chưa trả mã lesson để mở review.");
+        const taxonomyVersion = Number(result.taxonomyVersion);
+        if (!lessonId || !Number.isInteger(taxonomyVersion) || taxonomyVersion < 1) throw new Error("Backend chưa trả đủ lesson ID và taxonomy version để mở review.");
         await Promise.all([
           queryClient.invalidateQueries({
             queryKey: ["teacher", "copilot", "draft", lessonId],
@@ -46,7 +47,7 @@ export function LessonGenerationJobWorkspace({ jobId }: { jobId: string }) {
           }),
         ]);
         router.replace(
-          `/teacher/lessons/${encodeURIComponent(lessonId)}/review?generationJobId=${encodeURIComponent(activeJobId)}`,
+          `/teacher/lessons/${encodeURIComponent(lessonId)}/review?taxonomyVersion=${taxonomyVersion}&generationJobId=${encodeURIComponent(activeJobId)}`,
         );
       })
       .catch((generationError) => {
@@ -76,6 +77,7 @@ export function LessonGenerationJobWorkspace({ jobId }: { jobId: string }) {
 
   if (partial) {
     const partialLessonId = String(partial.lessonId || "");
+    const partialTaxonomyVersion = Number(partial.taxonomyVersion);
     return (
       <section className="lesson-generation-screen">
         <div className="lesson-generation-panel">
@@ -90,8 +92,8 @@ export function LessonGenerationJobWorkspace({ jobId }: { jobId: string }) {
             <button
               className="secondary-button"
               type="button"
-              disabled={!partialLessonId}
-              onClick={() => router.push(`/teacher/lessons/${encodeURIComponent(partialLessonId)}/review?generationJobId=${encodeURIComponent(activeJobId)}`)}
+              disabled={!partialLessonId || !Number.isInteger(partialTaxonomyVersion) || partialTaxonomyVersion < 1}
+              onClick={() => router.push(`/teacher/lessons/${encodeURIComponent(partialLessonId)}/review?taxonomyVersion=${partialTaxonomyVersion}&generationJobId=${encodeURIComponent(activeJobId)}`)}
             >
               <BookOpenText size={16} /> Review bản hiện tại
             </button>

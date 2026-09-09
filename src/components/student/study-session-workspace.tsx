@@ -62,8 +62,13 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
       // Entering Session 2 means any lesson-scoped feedback belongs to an
       // earlier attempt. The current close will write a fresh summary.
       sessionStorage.removeItem(`dfriend:feedback:${lessonId}`);
-      const active = await studentApi.activeSession(lessonId);
-      const value = active.status === "not_found" ? await studentApi.startSession(lessonId) : active;
+      const lesson = await studentApi.exercise(lessonId);
+      const taxonomyVersion = Number(lesson.taxonomyVersion);
+      if (!Number.isInteger(taxonomyVersion) || taxonomyVersion < 1) {
+        throw new Error("Bài học chưa có taxonomy version hợp lệ.");
+      }
+      const active = await studentApi.activeSession(lessonId, taxonomyVersion);
+      const value = active.status === "not_found" ? await studentApi.startSession(lessonId, taxonomyVersion) : active;
       if (!value.session_id || !value.problems?.length) throw new Error("Session 2 chưa có bài tập để bắt đầu.");
       setSession(value);
       setActiveProblemId(value.current_problem_id || value.problems[0].problem_id);
@@ -162,7 +167,11 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
     setLastCloseWasEarly(finishEarly);
     setUiState("closing");
     try {
-      const summary = await studentApi.closeSession(session.session_id, lessonId, { finishEarly });
+      const sessionTaxonomyVersion = Number(session.taxonomyVersion);
+      if (!Number.isInteger(sessionTaxonomyVersion) || sessionTaxonomyVersion < 1) {
+        throw new Error("Phiên học chưa có taxonomy version hợp lệ.");
+      }
+      const summary = await studentApi.closeSession(session.session_id, lessonId, sessionTaxonomyVersion, { finishEarly });
       if (summary.status === "error") throw new Error(summary.message || "Chưa thể kết thúc phiên học.");
       sessionStorage.setItem(`dfriend:feedback:${lessonId}`, JSON.stringify(summary));
       await queryClient.invalidateQueries({ queryKey: studentKeys.metrics });
