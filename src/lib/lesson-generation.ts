@@ -2,6 +2,7 @@ import { isApiErrorStatus, teacherApi } from "@/lib/api-client";
 
 export type LessonGenerationResult = Record<string, unknown> & {
   lessonId?: string;
+  taxonomyVersion?: number;
   problemCount?: number;
   generationStatus?: "complete" | "partial_ready" | "partial_blocked" | "partial" | null;
   generationCompletedSlots?: number;

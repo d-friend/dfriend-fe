@@ -31,7 +31,7 @@ export function StudentShell({ children }: { children: ReactNode }) {
   const reduceMotion = useReducedMotion();
   const [accountOpen, setAccountOpen] = useState(false);
   const [logoutError, setLogoutError] = useState("");
-  const immersive = pathname.startsWith("/student/lesson/") || pathname.startsWith("/student/report/");
+  const immersive = pathname.startsWith("/student/lesson/") || pathname.startsWith("/student/report/") || pathname.startsWith("/student/onboarding");
 
   const meQuery = useQuery({ queryKey: studentKeys.me, queryFn: studentApi.me });
   const logout = useMutation({

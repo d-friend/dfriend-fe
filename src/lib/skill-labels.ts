@@ -1,5 +1,8 @@
 const DIRECT_SKILL_LABELS: Record<string, string> = {
   "identify-monomial": "Nhận biết đơn thức",
+  "identify-coefficient-variable-part": "Xác định hệ số và phần biến",
+  "identify-like-monomials": "Nhận biết đơn thức đồng dạng",
+  "add-subtract-like-monomials": "Cộng, trừ đơn thức đồng dạng",
   "reduce-monomial": "Rút gọn đơn thức",
   "multiply-monomials": "Nhân các đơn thức",
   "divide-monomials": "Chia các đơn thức",

@@ -37,12 +37,15 @@ export function DocumentsWorkspace() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  const documentsQuery = useQuery({ queryKey: ["teacher", "documents"], queryFn: teacherApi.documents, refetchInterval: (query) => query.state.data?.some((item) => item.indexStatus === "pending" || item.indexStatus === "indexing") ? 5000 : false });
   const curriculumQuery = useQuery({ queryKey: ["curriculum"], queryFn: teacherApi.curriculum, staleTime: 5 * 60 * 1000 });
+  const catalogVersions = Array.from(new Set((curriculumQuery.data || []).map((item) => item.taxonomy_version)));
+  const catalogVersion = catalogVersions.length === 1 ? catalogVersions[0] : undefined;
+  const documentsQuery = useQuery({ queryKey: ["teacher", "documents", catalogVersion], queryFn: () => teacherApi.documents(catalogVersion as number), enabled: Boolean(catalogVersion), refetchInterval: (query) => query.state.data?.some((item) => item.indexStatus === "pending" || item.indexStatus === "indexing") ? 5000 : false });
 
   const topics = useMemo(() => curriculumQuery.data?.find((item) => item.value === subject)?.topics || [], [curriculumQuery.data, subject]);
   const concepts = useMemo(() => topics.find((item) => item.value === topic)?.concepts || [], [topics, topic]);
-  const canUpload = Boolean(file && title.trim() && subject && topic);
+  const taxonomyVersion = curriculumQuery.data?.find((item) => item.value === subject)?.taxonomy_version;
+  const canUpload = Boolean(file && title.trim() && subject && topic && taxonomyVersion);
   const filtered = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase("vi");
     if (!needle) return documentsQuery.data || [];
@@ -72,11 +75,11 @@ export function DocumentsWorkspace() {
   });
 
   const remove = useMutation({
-    mutationFn: teacherApi.deleteDocument,
+    mutationFn: (documentId: string) => teacherApi.deleteDocument(documentId, catalogVersion as number),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["teacher", "documents"] }),
   });
   const retryIndex = useMutation({
-    mutationFn: teacherApi.retryDocumentIndex,
+    mutationFn: (documentId: string) => teacherApi.retryDocumentIndex(documentId, catalogVersion as number),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["teacher", "documents"] }),
     onError: (retryError) => setError(getApiErrorMessage(retryError, "Không thể lập chỉ mục lại tài liệu.")),
   });
@@ -107,7 +110,7 @@ export function DocumentsWorkspace() {
     event.preventDefault();
     setError("");
     setSuccess("");
-    if (!file || !title.trim() || !subject || !topic) {
+    if (!file || !title.trim() || !subject || !topic || !taxonomyVersion) {
       setError("Chọn đủ môn, chủ đề, tên tài liệu và tệp trước khi tải lên.");
       return;
     }
@@ -117,6 +120,7 @@ export function DocumentsWorkspace() {
     body.append("description", description.trim());
     body.append("subject", subject);
     body.append("topic", topic);
+    body.append("taxonomyVersion", String(taxonomyVersion));
     if (concept) body.append("concept", concept);
     body.append("shared", shared ? "true" : "false");
     upload.mutate(body);

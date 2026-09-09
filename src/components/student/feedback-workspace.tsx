@@ -21,7 +21,6 @@ import type { PostMasterySkillEvidence, StudySessionSummary } from "@/types/cont
 
 export function FeedbackWorkspace({ lessonId }: { lessonId: string }) {
   const reduceMotion = useReducedMotion();
-  const followUp = lessonId.startsWith("extra_");
   const [cachedSummary, setCachedSummary] = useState<StudySessionSummary | null>(null);
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -36,7 +35,8 @@ export function FeedbackWorkspace({ lessonId }: { lessonId: string }) {
     refetchInterval: (query) =>
       query.state.data?.status === "FEEDBACK_PENDING" ? 3_000 : false,
   });
-  const extrasQuery = useQuery({ queryKey: ["student", "extra", lessonId], queryFn: () => studentApi.extraExercises(lessonId), retry: 0 });
+  const followUp = reportQuery.data?.lessonKind === "remedial" || reportQuery.data?.lessonKind === "advanced";
+  const extrasQuery = useQuery({ queryKey: ["student", "extra", lessonId], queryFn: () => studentApi.extraExercises(lessonId), retry: 0, enabled: reportQuery.data?.lessonKind === "main" });
   const summary = reportQuery.data?.sessionSummary || cachedSummary || null;
   const masteryReport = summary?.post_mastery_report || null;
   const strengths = masteryReport?.strengths || [];
@@ -45,14 +45,7 @@ export function FeedbackWorkspace({ lessonId }: { lessonId: string }) {
   const evidenceItems = [...strengths, ...gaps, ...developing].flatMap((item) => item.evidence || []);
   const finishedCount = new Set(evidenceItems.map((item) => item.problem_id)).size;
   const progressPercent = clamp(reportQuery.data?.sessionProgress || 0, 0, 100);
-  const totalCount = followUp ? finishedCount : Math.max(finishedCount, 4);
-  const assignedExtraCount = (extrasQuery.data?.extra_exercises || []).reduce(
-    (count, group) => count + (group.problem_count || group.exercises.length),
-    0,
-  );
-  const expectedCount = followUp
-    ? Math.max(finishedCount, assignedExtraCount)
-    : totalCount;
+  const expectedCount = Math.max(finishedCount, 4);
   const progressCompletedCount = Math.round((progressPercent / 100) * expectedCount);
   const completedCount = Math.min(
     expectedCount,

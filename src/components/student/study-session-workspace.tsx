@@ -24,10 +24,12 @@ import { MathContent } from "@/components/shared/math-content";
 import { studentApi, studentKeys } from "@/lib/student-api";
 import { streamStudyBuddy, type StudyStreamEvent } from "@/lib/student-stream";
 import { deriveStudyProgress } from "@/lib/study-progress";
+import { buildMasteryGreeting, companionPolicy } from "@/lib/student-companion";
 import type { StudyProblem, StudySession } from "@/types/contracts";
 
 type ChatMessage = { id: string; role: "student" | "buddy"; content: string; degraded?: boolean };
 type SessionUiState = "initialising" | "idle" | "streaming" | "awaiting_reasoning" | "clarifying" | "farming" | "degraded" | "closing";
+type StudyChoice = { label: string; content: string };
 
 const ROLE_LABELS: Record<string, string> = {
   reinforcement: "The Warm-Up · Chứng minh điều vừa học",
@@ -38,14 +40,13 @@ const ROLE_LABELS: Record<string, string> = {
 
 export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
   const router = useRouter();
-  const followUp = lessonId.startsWith("extra_");
-  const parentLessonId = followUp ? lessonId.slice("extra_".length) : lessonId;
   const queryClient = useQueryClient();
+  const [lessonKind, setLessonKind] = useState<"main" | "remedial" | "advanced">("main");
   const [session, setSession] = useState<StudySession | null>(null);
   const [sessionError, setSessionError] = useState("");
   const [uiState, setUiState] = useState<SessionUiState>("initialising");
   const [lastCloseWasEarly, setLastCloseWasEarly] = useState(false);
-  const [messages, setMessages] = useState<ChatMessage[]>([{ id: "welcome", role: "buddy", content: "Mình là bạn học của bạn trong buổi này. Mình sẽ nghe cách bạn nghĩ, hỏi lại khi cần và cùng gỡ chỗ bị kẹt, nhưng không làm hộ bài." }]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [message, setMessage] = useState("");
   const [answer, setAnswer] = useState("");
   const [scratchpads, setScratchpads] = useState<Record<number, string>>({});
@@ -62,10 +63,17 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
       // Entering Session 2 means any lesson-scoped feedback belongs to an
       // earlier attempt. The current close will write a fresh summary.
       sessionStorage.removeItem(`dfriend:feedback:${lessonId}`);
-      const active = await studentApi.activeSession(lessonId);
-      const value = active.status === "not_found" ? await studentApi.startSession(lessonId) : active;
+      const lesson = await studentApi.exercise(lessonId);
+      setLessonKind(lesson.lessonKind || "main");
+      const taxonomyVersion = Number(lesson.taxonomyVersion);
+      if (!Number.isInteger(taxonomyVersion) || taxonomyVersion < 1) {
+        throw new Error("Bài học chưa có taxonomy version hợp lệ.");
+      }
+      const active = await studentApi.activeSession(lessonId, taxonomyVersion);
+      const value = active.status === "not_found" ? await studentApi.startSession(lessonId, taxonomyVersion) : active;
       if (!value.session_id || !value.problems?.length) throw new Error("Session 2 chưa có bài tập để bắt đầu.");
       setSession(value);
+      setMessages([{ id: "welcome", role: "buddy", content: buildMasteryGreeting(value.response_adaptation_policy) }]);
       setActiveProblemId(value.current_problem_id || value.problems[0].problem_id);
       setUiState("idle");
     } catch (error) {
@@ -84,10 +92,13 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
   }, [message]);
 
   const problems = session?.problems || [];
+  const activeCompanion = companionPolicy(session?.response_adaptation_policy);
+  const followUp = lessonKind !== "main";
   const currentProblem = problems.find((item) => item.problem_id === activeProblemId) || problems[0];
-  const answerChoices = currentProblem
-    ? choiceLabelsFromQuestion(currentProblem.question)
-    : [];
+  const displayedQuestion = currentProblem
+    ? splitStudyQuestionChoices(currentProblem.question)
+    : { stem: "", choices: [] };
+  const answerChoices = displayedQuestion.choices.map((choice) => choice.label);
   const { completedCount, allComplete } = deriveStudyProgress(problems, session);
   const currentProblemIndex = currentProblem
     ? problems.findIndex((item) => item.problem_id === currentProblem.problem_id)
@@ -162,7 +173,11 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
     setLastCloseWasEarly(finishEarly);
     setUiState("closing");
     try {
-      const summary = await studentApi.closeSession(session.session_id, lessonId, { finishEarly });
+      const sessionTaxonomyVersion = Number(session.taxonomyVersion);
+      if (!Number.isInteger(sessionTaxonomyVersion) || sessionTaxonomyVersion < 1) {
+        throw new Error("Phiên học chưa có taxonomy version hợp lệ.");
+      }
+      const summary = await studentApi.closeSession(session.session_id, lessonId, sessionTaxonomyVersion, { finishEarly });
       if (summary.status === "error") throw new Error(summary.message || "Chưa thể kết thúc phiên học.");
       sessionStorage.setItem(`dfriend:feedback:${lessonId}`, JSON.stringify(summary));
       await queryClient.invalidateQueries({ queryKey: studentKeys.metrics });
@@ -174,12 +189,12 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
     }
   }
 
-  if (sessionError && !session) return <SessionStartError message={sessionError} retry={initialise} lessonId={lessonId} followUp={followUp} parentLessonId={parentLessonId} />;
+  if (sessionError && !session) return <SessionStartError message={sessionError} retry={initialise} lessonId={lessonId} followUp={followUp} />;
 
   return (
     <div className="learning-shell study-shell">
       <header className="learning-header study-header">
-        <Link href={followUp ? `/student/report/${parentLessonId}` : `/student/lesson/${lessonId}/part1`}><ArrowLeft size={19} /><span>{followUp ? "Feedback trước" : "Session 1"}</span></Link>
+        <Link href={`/student/lesson/${lessonId}/part1`}><ArrowLeft size={19} /><span>Session 1</span></Link>
         <div className="study-header-center"><span><Mountains size={16} weight="fill" /> Đường lên đỉnh</span><MountainProgress problems={problems} completedCount={completedCount} currentProblemId={activeProblemId} waiting={uiState === "awaiting_reasoning" || uiState === "farming"} /></div>
         <div className="study-header-actions">
           {!allComplete && session?.session_id ? <button type="button" className="study-early-finish" onClick={() => void closeSession(true)} disabled={uiState === "streaming" || uiState === "closing"}><Flag size={14} weight="fill" /><span>{uiState === "closing" ? "Đang tổng hợp" : "Kết thúc sớm"}</span></button> : null}
@@ -198,7 +213,19 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
                   <span>Bài {currentProblemIndex + 1} / {problems.length}</span>
                   <strong>{currentRoleLabel}</strong>
                 </header>
-                <MathContent>{currentProblem.question}</MathContent>
+                <div className="study-problem-statement">
+                  <MathContent>{displayedQuestion.stem}</MathContent>
+                  {displayedQuestion.choices.length ? (
+                    <ol className="study-problem-choices" type="A">
+                      {displayedQuestion.choices.map((choice) => (
+                        <li key={choice.label}>
+                          <span className="study-choice-label">{choice.label}.</span>
+                          <MathContent answer>{choice.content}</MathContent>
+                        </li>
+                      ))}
+                    </ol>
+                  ) : null}
+                </div>
               </article>
               <div className="scratchpad"><label htmlFor="scratchpad"><PencilSimpleLine size={18} /> Nháp của bạn</label><textarea id="scratchpad" value={scratchpads[currentProblem.problem_id] || ""} onChange={(event) => setScratchpads((current) => ({ ...current, [currentProblem.problem_id]: event.target.value }))} placeholder="Ghi các bước, thử phép tính hoặc viết điều bạn đang nghĩ..." /></div>
             </div>
@@ -206,8 +233,8 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
           </section>
 
           <section className="buddy-pane" data-mobile-active={mobileTab === "buddy"}>
-            <div className="buddy-title"><div><span className="buddy-mark"><Sparkle size={18} weight="fill" /></span><div><strong>Bạn học AI</strong><small>Gợi mở, không làm hộ</small></div></div>{uiState === "streaming" && <span className="buddy-typing">Đang đọc cách bạn nghĩ</span>}</div>
-            <div className="buddy-transcript" ref={transcriptRef}>{messages.map((item) => <article key={item.id} data-role={item.role} data-degraded={item.degraded}><span>{item.role === "buddy" ? "Study Buddy" : "Bạn"}</span>{item.content ? <MathContent>{item.content}</MathContent> : <div className="markdown-body"><TypingPlaceholder /></div>}</article>)}{uiState === "awaiting_reasoning" && <StateNotice type="reasoning" />}{uiState === "clarifying" && <StateNotice type="clarifying" />}{uiState === "farming" && <StateNotice type="farming" />}{uiState === "degraded" && <StateNotice type="degraded" />}{allComplete && <div className="summit-card"><Flag size={25} weight="fill" /><div><strong>Bạn đã tới đỉnh của phiên học</strong><span>Kết thúc để nhận phản hồi về điểm mạnh và phần nên luyện tiếp.</span></div><button className="student-primary-button" onClick={() => void closeSession()} disabled={uiState === "closing"}>{uiState === "closing" ? "Đang tổng hợp" : "Nhận feedback"}</button></div>}{sessionError && session && <div className="student-form-error" role="alert">{sessionError} <button onClick={() => void closeSession(lastCloseWasEarly)}>Thử lại</button></div>}</div>
+            <div className="buddy-title"><div><span className="buddy-mark"><Sparkle size={18} weight="fill" /></span><div><strong>{activeCompanion.companion_name}</strong><small>Bạn học AI · Gợi mở, không làm hộ</small></div></div>{uiState === "streaming" && <span className="buddy-typing">Đang đọc cách bạn nghĩ</span>}</div>
+            <div className="buddy-transcript" ref={transcriptRef}>{messages.map((item) => <article key={item.id} data-role={item.role} data-degraded={item.degraded}><span>{item.role === "buddy" ? activeCompanion.companion_name : "Bạn"}</span>{item.content ? <MathContent>{item.content}</MathContent> : <div className="markdown-body"><TypingPlaceholder /></div>}</article>)}{uiState === "awaiting_reasoning" && <StateNotice type="reasoning" />}{uiState === "clarifying" && <StateNotice type="clarifying" />}{uiState === "farming" && <StateNotice type="farming" />}{uiState === "degraded" && <StateNotice type="degraded" />}{allComplete && <div className="summit-card"><Flag size={25} weight="fill" /><div><strong>Bạn đã tới đỉnh của phiên học</strong><span>Kết thúc để nhận phản hồi về điểm mạnh và phần nên luyện tiếp.</span></div><button className="student-primary-button" onClick={() => void closeSession()} disabled={uiState === "closing"}>{uiState === "closing" ? "Đang tổng hợp" : "Nhận feedback"}</button></div>}{sessionError && session && <div className="student-form-error" role="alert">{sessionError} <button onClick={() => void closeSession(lastCloseWasEarly)}>Thử lại</button></div>}</div>
             <form className="buddy-composer" onSubmit={submitChat}><label htmlFor="buddy-message">Trao đổi cách làm</label><div><textarea ref={buddyMessageRef} id="buddy-message" rows={1} value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={handleChatKeyDown} placeholder="Mình đang nghĩ là..." disabled={uiState === "streaming" || uiState === "closing"} /><button aria-label="Gửi tin nhắn" disabled={!canSendChat}><PaperPlaneTilt size={19} weight="fill" /></button></div></form>
           </section>
         </div>
@@ -229,8 +256,29 @@ function MountainProgress({ problems, completedCount, currentProblemId, waiting 
     })}
   </div>;
 }
-function choiceLabelsFromQuestion(question: string) { const labels = Array.from(question.matchAll(/(?:^|\s)([A-D])\s*[.)\]:：]\s*/gi), (match) => match[1].toUpperCase()); const unique = Array.from(new Set(labels)); return unique.length >= 3 ? unique : []; }
+export function splitStudyQuestionChoices(question: string): { stem: string; choices: StudyChoice[] } {
+  const normalized = question.replace(/\\n(?=\s*[A-D]\s*[.)\]:：=])/gi, "\n");
+  const matches = Array.from(normalized.matchAll(/(?:^|\s)([A-D])\s*[.)\]:：=]\s*/gi));
+  const labels = matches.map((match) => match[1].toUpperCase());
+  const sequential = labels.every((label, index) => label === String.fromCharCode(65 + index));
+  if (matches.length < 3 || matches.length > 4 || !sequential) {
+    return { stem: normalized, choices: [] };
+  }
+
+  const choices = matches.map((match, index) => ({
+    label: labels[index],
+    content: normalized
+      .slice((match.index || 0) + match[0].length, matches[index + 1]?.index ?? normalized.length)
+      .trim(),
+  }));
+  if (choices.some((choice) => !choice.content)) return { stem: normalized, choices: [] };
+
+  return {
+    stem: normalized.slice(0, matches[0].index).trim(),
+    choices,
+  };
+}
 function TypingPlaceholder() { return <span className="typing-placeholder"><i /><i /><i /></span>; }
 function StateNotice({ type }: { type: "reasoning" | "clarifying" | "farming" | "degraded" }) { const copy = type === "reasoning" ? ["Cần thêm lập luận", "Đáp án có tín hiệu đúng, nhưng Study Buddy cần nghe cách bạn suy nghĩ trước khi đi tiếp."] : type === "clarifying" ? ["Chưa đủ chắc để chấm", "Study Buddy sẽ hỏi lại thay vì đoán. Bài và tiến độ hiện tại được giữ nguyên."] : type === "farming" ? ["Tiến độ chưa thay đổi", "Thử chậm lại và giải thích một bước. Đường lên đỉnh sẽ chỉ tiến khi phần học được xác nhận."] : ["Phản hồi bị gián đoạn", "Nội dung đã nhận vẫn được giữ. Bạn có thể gửi lại khi kết nối ổn định."]; return <div className="buddy-state-notice"><WarningCircle size={20} /><div><strong>{copy[0]}</strong><span>{copy[1]}</span></div></div>; }
 function StudyLoading() { return <div className="study-layout"><div className="problem-pane"><div className="student-skeleton m-6" /></div><div className="buddy-pane"><div className="student-skeleton m-6" /></div></div>; }
-function SessionStartError({ message, retry, lessonId, followUp, parentLessonId }: { message: string; retry: () => void; lessonId: string; followUp: boolean; parentLessonId: string }) { return <div className="learning-error"><ChatCircleDots size={38} /><h1>{followUp ? "Bài luyện thêm chưa sẵn sàng" : "Session 2 chưa sẵn sàng"}</h1><p>{message}</p><div><Link className="student-secondary-button" href={followUp ? `/student/report/${parentLessonId}` : `/student/lesson/${lessonId}/part1`}>{followUp ? "Về feedback trước" : "Về Session 1"}</Link><button className="student-primary-button" onClick={retry}>Thử lại</button></div></div>; }
+function SessionStartError({ message, retry, lessonId, followUp }: { message: string; retry: () => void; lessonId: string; followUp: boolean }) { return <div className="learning-error"><ChatCircleDots size={38} /><h1>{followUp ? "Bài follow-up chưa sẵn sàng" : "Session 2 chưa sẵn sàng"}</h1><p>{message}</p><div><Link className="student-secondary-button" href={`/student/lesson/${lessonId}/part1`}>Về Session 1</Link><button className="student-primary-button" onClick={retry}>Thử lại</button></div></div>; }

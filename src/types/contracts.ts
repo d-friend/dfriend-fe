@@ -10,6 +10,39 @@ export interface AuthUser {
   is_beta_activated: boolean;
 }
 
+export type StudentScaffoldingPreference =
+  | "small_hint"
+  | "guided_questions"
+  | "similar_example";
+export type StudentPacePreference =
+  | "concise"
+  | "step_by_step"
+  | "intuition_first";
+export type StudentTonePreference = "calm" | "direct" | "encouraging";
+
+export interface StudentOnboarding {
+  completed: boolean;
+  version: number;
+  skipped: boolean;
+  student_display_name: string;
+  companion_name: string;
+  preferences: {
+    scaffolding: StudentScaffoldingPreference;
+    pace: StudentPacePreference;
+    tone: StudentTonePreference;
+  };
+}
+
+export interface ResponseAdaptationPolicy {
+  student_display_name: string;
+  companion_name: string;
+  preferred_representation: string[];
+  scaffolding: string;
+  pace: string;
+  challenge: string;
+  tone: string;
+}
+
 export interface AdminUser {
   id: string;
   username: string;
@@ -187,6 +220,9 @@ export interface TeacherRoadmapItem {
   type: "exercise";
   questionsCount: number;
   completedCount: number;
+  contentRevision?: number;
+  pdfArtifact?: LessonPdfArtifact | null;
+  teacherPdfArtifact?: LessonPdfArtifact | null;
   deadline?: string;
   hook?: string;
   material?: string;
@@ -201,6 +237,21 @@ export interface TeacherRoadmapItem {
     content?: string;
     material?: string;
   } | null;
+}
+
+export interface LessonPdfArtifact {
+  artifactId: string;
+  lessonId?: string;
+  taxonomyVersion?: number;
+  contentRevision: number;
+  audience?: "STUDENT" | "TEACHER";
+  status?: "GENERATING" | "READY" | "FAILED";
+  filename: string;
+  sizeBytes?: number | null;
+  checksumSha256?: string | null;
+  failureCode?: string | null;
+  createdAt: string;
+  updatedAt?: string;
 }
 
 export interface TeacherSubmission {
@@ -258,6 +309,7 @@ export interface CopilotStep {
 
 export interface CopilotDraft {
   lessonId: string;
+  taxonomyVersion: number;
   classId?: string | null;
   conceptKey?: string | null;
   goalText?: string | null;
@@ -272,6 +324,7 @@ export interface CopilotPlanSkill {
 }
 
 export interface CopilotLessonPlan {
+  taxonomyVersion: number;
   goalText: string;
   conceptKey: string;
   subjectLabel: string;
@@ -294,6 +347,7 @@ export interface CopilotChatResponse {
 }
 
 export interface CopilotReportSummary {
+  taxonomyVersion: number;
   reportId?: string;
   reportVersion?: number;
   reportHash?: string;
@@ -412,12 +466,14 @@ export interface CurriculumTopic {
 }
 
 export interface CurriculumSubject {
+  taxonomy_version: number;
   value: string;
   label: string;
   topics: CurriculumTopic[];
 }
 
 export interface ExerciseDocument {
+  taxonomyVersion: number;
   documentId: string;
   title: string;
   description?: string;
@@ -481,6 +537,7 @@ export interface StudentAssignment {
 export interface StudentRoadmapItem {
   id: string;
   lessonId: string;
+  taxonomyVersion: number;
   lesson_id?: string;
   title: string;
   status: "completed" | "active" | "locked";
@@ -526,6 +583,11 @@ export interface SessionOneProgress {
 
 export interface StudentExercise {
   id: string;
+  taxonomyVersion: number;
+  aiLessonId?: string;
+  publicationId?: string | null;
+  lessonKind?: "main" | "remedial" | "advanced";
+  parentAiLessonId?: string | null;
   title: string;
   description: string;
   material?: string;
@@ -560,6 +622,8 @@ export interface StudySession {
   subject?: string;
   topic?: string;
   concept?: string;
+  taxonomyVersion?: number;
+  response_adaptation_policy?: ResponseAdaptationPolicy;
 }
 
 export interface StudySessionSummary {
@@ -627,6 +691,7 @@ export interface PostMasteryReport {
 export interface StudentReport {
   lessonId: string;
   lessonTitle?: string | null;
+  lessonKind?: "main" | "remedial" | "advanced";
   score?: number;
   sessionProgress?: number | null;
   status?: string;

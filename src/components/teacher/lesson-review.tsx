@@ -2,9 +2,10 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { ArrowLeft, ArrowsClockwise, Check, CheckCircle, CircleNotch, ShieldCheck, WarningCircle } from "@phosphor-icons/react";
+import { ArrowLeft, ArrowSquareOut, ArrowsClockwise, Check, CheckCircle, CircleNotch, FilePdf, ShieldCheck, WarningCircle } from "@phosphor-icons/react";
 import { useMemo, useState } from "react";
 import { getApiErrorMessage, teacherApi } from "@/lib/api-client";
+import { skillDisplayName } from "@/lib/skill-labels";
 import {
   buildRegenerationTargets,
   DraftProblemList,
@@ -12,6 +13,7 @@ import {
   normalizeDraftReview,
   type DraftReviewModel,
   type ProblemView,
+  type RegenerationGuidance,
 } from "@/components/teacher/lesson-authoring";
 
 type BlueprintSlot = {
@@ -40,9 +42,11 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const generationJobId = searchParams.get("generationJobId") || "";
+  const taxonomyVersion = Number(searchParams.get("taxonomyVersion"));
   const [classIds, setClassIds] = useState<string[] | null>(null);
   const [deadline, setDeadline] = useState(defaultDeadline());
   const [rejected, setRejected] = useState<Set<string>>(new Set());
+  const [regenerationGuidance, setRegenerationGuidance] = useState<Record<string, RegenerationGuidance>>({});
   const [error, setError] = useState("");
   const [blockers, setBlockers] = useState<Array<Record<string, unknown>>>([]);
   const [published, setPublished] = useState(false);
@@ -59,8 +63,9 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
   });
 
   const draftQuery = useQuery({
-    queryKey: ["teacher", "copilot", "draft", lessonId],
-    queryFn: () => teacherApi.copilotDraft(lessonId),
+    queryKey: ["teacher", "copilot", "draft", lessonId, taxonomyVersion],
+    queryFn: () => teacherApi.copilotDraft(lessonId, taxonomyVersion),
+    enabled: Number.isInteger(taxonomyVersion) && taxonomyVersion > 0,
     staleTime: 0,
     refetchOnMount: "always",
     refetchInterval: () => {
@@ -80,10 +85,26 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
   const approved = Number(draft?.approved_revision || 0) === revision;
   const readinessQuery = useQuery({
     queryKey: ["teacher", "draft", lessonId, "publish-readiness", revision, approved],
-    queryFn: () => teacherApi.checkLessonPublish(lessonId, revision),
+    queryFn: () => teacherApi.checkLessonPublish(lessonId, revision, taxonomyVersion),
     enabled: Boolean(draft),
     staleTime: 0,
     refetchOnMount: "always",
+  });
+  const pdfArtifactQuery = useQuery({
+    queryKey: ["teacher", "draft", lessonId, "full-content-pdf", taxonomyVersion, revision],
+    queryFn: () => teacherApi.lessonPdfArtifact(lessonId, revision, taxonomyVersion),
+    enabled: Boolean(draft) && !followUp,
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchInterval: (query) => query.state.data?.status === "GENERATING" ? 1500 : false,
+  });
+  const teacherPdfArtifactQuery = useQuery({
+    queryKey: ["teacher", "draft", lessonId, "teacher-full-content-pdf", taxonomyVersion, revision],
+    queryFn: () => teacherApi.teacherLessonPdfArtifact(lessonId, revision, taxonomyVersion),
+    enabled: Boolean(draft) && !followUp,
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchInterval: (query) => query.state.data?.status === "GENERATING" ? 1500 : false,
   });
   const draftClassIds = Array.isArray(draft?.class_ids)
     ? draft.class_ids.filter((id): id is string => typeof id === "string")
@@ -118,37 +139,50 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
   const hasNonMasteryContent = contentWithoutMastery.knowledgeSections.length > 0 || contentWithoutMastery.knowledgeProblems.length > 0 || contentWithoutMastery.masteryProblems.length > 0;
 
   const approve = useMutation({
-    mutationFn: () => teacherApi.approveLessonReview(lessonId, revision),
+    mutationFn: () => teacherApi.approveLessonReview(lessonId, revision, taxonomyVersion),
     onSuccess: async () => { setError(""); setBlockers([]); await draftQuery.refetch(); },
     onError: async (approvalError) => { setError(getApiErrorMessage(approvalError)); await draftQuery.refetch(); },
   });
   const regenerate = useMutation({
     mutationFn: () => {
-      const targets = buildRegenerationTargets(review, rejected);
+      const targets = buildRegenerationTargets(review, rejected, regenerationGuidance);
       if (targets.length !== rejected.size) {
         throw new Error("Một số câu trong bản nháp thiếu mã nguồn để soạn lại an toàn.");
       }
-      return teacherApi.regenerateLessonReview(lessonId, targets, revision);
+      return teacherApi.regenerateLessonReview(lessonId, targets, revision, taxonomyVersion);
     },
-    onSuccess: async () => { setRejected(new Set()); setError(""); await draftQuery.refetch(); },
+    onSuccess: async () => { setRejected(new Set()); setRegenerationGuidance({}); setError(""); await draftQuery.refetch(); },
     onError: async (regenerationError) => { setError(getApiErrorMessage(regenerationError, "Không thể soạn lại các câu đã chọn.")); await draftQuery.refetch(); },
   });
   const completePool = useMutation({
-    mutationFn: () => teacherApi.completeLessonReviewPool(lessonId, revision),
+    mutationFn: () => teacherApi.completeLessonReviewPool(lessonId, revision, taxonomyVersion),
     onSuccess: async () => { setError(""); setBlockers([]); await draftQuery.refetch(); },
     onError: async (completionError) => { setError(getApiErrorMessage(completionError, "Không thể bù bài còn thiếu.")); await draftQuery.refetch(); },
   });
-  const retryMissing = useMutation({
-    mutationFn: () => teacherApi.retryMissingLessonSlots(generationJobId),
-    onSuccess: (queued) => router.push(
-      `/teacher/lessons/generating/${encodeURIComponent(queued.jobId)}`,
-    ),
-    onError: (retryError) => setError(
-      getApiErrorMessage(retryError, "Chưa thể tạo tiếp các slot còn thiếu."),
-    ),
+  const exportPdf = useMutation({
+    mutationFn: () => teacherApi.generateLessonPdf(lessonId, revision, taxonomyVersion),
+    onSuccess: async (artifact) => {
+      setError("");
+      pdfArtifactQuery.refetch();
+      if (artifact.status === "READY") {
+        await openLessonPdf(artifact.artifactId, "inline", setError);
+      }
+    },
+    onError: (pdfError) => setError(getApiErrorMessage(pdfError, "Không thể tạo PDF bài học.")),
+  });
+  const exportTeacherPdf = useMutation({
+    mutationFn: () => teacherApi.generateTeacherLessonPdf(lessonId, revision, taxonomyVersion),
+    onSuccess: async (artifact) => {
+      setError("");
+      void teacherPdfArtifactQuery.refetch();
+      if (artifact.status === "READY") {
+        await openLessonPdf(artifact.artifactId, "inline", setError);
+      }
+    },
+    onError: (pdfError) => setError(getApiErrorMessage(pdfError, "Không thể tạo bản PDF giáo viên.")),
   });
   const publish = useMutation({
-    mutationFn: () => followUp ? teacherApi.publishFollowUpDraft(lessonId, revision) : teacherApi.publishCopilotDraft(lessonId, { classIds: selectedClassIds, deadline: new Date(deadline).toISOString(), title: title.trim(), expectedRevision: revision }),
+    mutationFn: () => followUp ? teacherApi.publishFollowUpDraft(lessonId, revision, taxonomyVersion) : teacherApi.publishCopilotDraft(lessonId, { classIds: selectedClassIds, deadline: new Date(deadline).toISOString(), title: title.trim(), expectedRevision: revision, taxonomyVersion }),
     onSuccess: () => setPublished(true),
     onError: async (publishError) => {
       const body = (publishError as { response?: { data?: { blockers?: Array<Record<string, unknown>>; message?: string }; message?: string } }).response?.data;
@@ -158,6 +192,7 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
     },
   });
 
+  if (!Number.isInteger(taxonomyVersion) || taxonomyVersion < 1) return <div className="lesson-immersive"><div className="center-state"><WarningCircle size={30} /><h1>Thiếu taxonomy version</h1><p>Link review không xác định phiên bản taxonomy nên không thể mở an toàn.</p><button className="secondary-button" onClick={() => router.back()}>Quay lại</button></div></div>;
   if (draftQuery.isLoading) return <div className="lesson-immersive"><div className="review-layout"><div className="skeleton h-28" /><div className="skeleton h-96 mt-5" /></div></div>;
   if (draftQuery.isError) return <div className="lesson-immersive"><div className="center-state"><WarningCircle size={30} /><h1>Không mở được bản nháp</h1><p>{getApiErrorMessage(draftQuery.error)}</p><button className="secondary-button" onClick={() => router.back()}>Quay lại</button></div></div>;
   if (published) return <div className="lesson-immersive"><div className="publish-success"><span><CheckCircle size={32} weight="fill" /></span><h1>Đã xuất bản bài học</h1><p>{followUp ? "Bài tập đã được gửi đúng nhóm học sinh." : "Các lớp đã nhận được bài học mới."}</p><button className="primary-button" onClick={() => router.push(selectedClassIds[0] ? `/teacher/classes/${selectedClassIds[0]}?tab=learning-path` : "/teacher/classes")}>Về lớp học</button></div></div>;
@@ -166,9 +201,38 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
     approve.isPending ||
     regenerate.isPending ||
     completePool.isPending ||
-    retryMissing.isPending ||
+    exportPdf.isPending ||
+    exportTeacherPdf.isPending ||
     publish.isPending;
+  const pdfDisabled = reviewMutationPending || readinessQuery.isLoading || readinessQuery.data?.publishable !== true || !approved || !hasCompleteArc || rejected.size > 0;
   const publishDisabled = reviewMutationPending || readinessQuery.isLoading || readinessQuery.data?.publishable !== true || !approved || !hasCompleteArc || rejected.size > 0 || (!followUp && (selectedClassIds.length === 0 || !title.trim()));
+  const pdfArtifact = pdfArtifactQuery.data;
+  const pdfGenerating = exportPdf.isPending || pdfArtifact?.status === "GENERATING";
+  const teacherPdfArtifact = teacherPdfArtifactQuery.data;
+  const teacherPdfGenerating = exportTeacherPdf.isPending || teacherPdfArtifact?.status === "GENERATING";
+  const handlePdfAction = () => {
+    if (pdfArtifact?.status === "READY") {
+      void openLessonPdf(pdfArtifact.artifactId, "inline", setError);
+      return;
+    }
+    exportPdf.mutate();
+  };
+  const handleTeacherPdfAction = () => {
+    if (teacherPdfArtifact?.status === "READY") {
+      void openLessonPdf(teacherPdfArtifact.artifactId, "inline", setError);
+      return;
+    }
+    exportTeacherPdf.mutate();
+  };
+  const toggleRejected = (id: string) => {
+    setRejected((current) => toggleSet(current, id));
+  };
+  const updateRegenerationGuidance = (id: string, field: keyof RegenerationGuidance, value: string) => {
+    setRegenerationGuidance((current) => ({
+      ...current,
+      [id]: { ...(current[id] || { reason: "", requestedChange: "" }), [field]: value },
+    }));
+  };
 
   return (
     <section className="lesson-immersive draft-review-page">
@@ -177,8 +241,10 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
         <span className={`review-state ${approved ? "approved" : "draft"}`}><ShieldCheck size={16} /> {approved ? `Đã duyệt · bản ${revision}` : `Bản nháp · bản ${revision}`}</span>
         <div>
           {rejected.size > 0 && <button className="secondary-button" onClick={() => regenerate.mutate()} disabled={reviewMutationPending}>{regenerate.isPending ? <CircleNotch className="animate-spin" size={16} /> : <ArrowsClockwise size={16} />} Soạn lại {rejected.size} câu</button>}
-          {poolDeficitCount > 0 && <button className="secondary-button" onClick={() => generationJobId ? retryMissing.mutate() : completePool.mutate()} disabled={reviewMutationPending}>{completePool.isPending || retryMissing.isPending ? <CircleNotch className="animate-spin" size={16} /> : <ArrowsClockwise size={16} />} Bù {poolDeficitCount} bài còn thiếu</button>}
+          {poolDeficitCount > 0 && <button className="secondary-button" onClick={() => completePool.mutate()} disabled={reviewMutationPending}>{completePool.isPending ? <CircleNotch className="animate-spin" size={16} /> : <ArrowsClockwise size={16} />} Bù {poolDeficitCount} bài còn thiếu</button>}
           {!approved && <button className="secondary-button" onClick={() => approve.mutate()} disabled={reviewMutationPending || !hasCompleteArc || rejected.size > 0}>{approve.isPending ? <CircleNotch className="animate-spin" size={16} /> : <Check size={16} />} Duyệt arc sẵn sàng</button>}
+          {!followUp && <button className="secondary-button" disabled={pdfDisabled || pdfArtifactQuery.isLoading} onClick={handlePdfAction}>{pdfGenerating ? <CircleNotch className="animate-spin" size={16} /> : pdfArtifact?.status === "READY" ? <ArrowSquareOut size={16} /> : <FilePdf size={16} />} {pdfGenerating ? "Đang tạo" : pdfArtifact?.status === "READY" ? "Bản học sinh" : pdfArtifact?.status === "FAILED" ? "Thử lại PDF HS" : "Xuất PDF HS"}</button>}
+          {!followUp && <button className="secondary-button" disabled={pdfDisabled || teacherPdfArtifactQuery.isLoading} onClick={handleTeacherPdfAction}>{teacherPdfGenerating ? <CircleNotch className="animate-spin" size={16} /> : teacherPdfArtifact?.status === "READY" ? <ArrowSquareOut size={16} /> : <FilePdf size={16} />} {teacherPdfGenerating ? "Đang tạo" : teacherPdfArtifact?.status === "READY" ? "Bản giáo viên" : teacherPdfArtifact?.status === "FAILED" ? "Thử lại PDF GV" : "Xuất PDF GV"}</button>}
           <button className="primary-button" disabled={publishDisabled} onClick={() => publish.mutate()}><Check size={16} /> {publish.isPending ? "Đang xuất bản" : "Xuất bản"}</button>
         </div>
       </header>
@@ -200,8 +266,8 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
           {(error || blockers.length > 0) && <div className="publish-blockers"><WarningCircle size={22} /><div><strong>{error}</strong>{blockers.map((item, index) => <p key={index}>{blockerLabel(item)}</p>)}</div></div>}
           {notices.length > 0 && <div className="publish-blockers" role="status"><WarningCircle size={22} /><div><strong>Nguồn bài và fallback</strong>{notices.map((notice, index) => <p key={`${notice.code}:${index}`}><b>{noticeLabel(notice.code)}</b>: {notice.detail || "Hãy kiểm tra các bài được đánh dấu trước khi xuất bản."}{notice.slotIds.length ? ` (${notice.slotIds.length} slot)` : ""}</p>)}</div></div>}
           {completePool.data?.failed_slots?.length ? <div className="publish-blockers"><WarningCircle size={22} /><div><strong>Một số slot chưa bù được</strong>{completePool.data.failed_slots.map((slot) => <p key={slot.slot_id}>{slot.slot_id}: {slot.reason}</p>)}</div></div> : null}
-          {hasNonMasteryContent || !matrix ? <DraftReviewContent review={contentWithoutMastery} rejected={rejected} onToggle={(id) => setRejected((current) => toggleSet(current, id))} /> : null}
-          {matrix ? <MasteryArcMatrix matrix={matrix} problems={problemByBankId} completeArcIds={completeArcIds} rejected={rejected} onToggle={(id) => setRejected((current) => toggleSet(current, id))} kind={kind} /> : null}
+          {hasNonMasteryContent || !matrix ? <DraftReviewContent review={contentWithoutMastery} rejected={rejected} guidance={regenerationGuidance} onToggle={toggleRejected} onGuidanceChange={updateRegenerationGuidance} /> : null}
+          {matrix ? <MasteryArcMatrix matrix={matrix} problems={problemByBankId} completeArcIds={completeArcIds} rejected={rejected} guidance={regenerationGuidance} onToggle={toggleRejected} onGuidanceChange={updateRegenerationGuidance} kind={kind} /> : null}
         </main>
 
         <aside className="draft-review-settings">
@@ -217,6 +283,26 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
   );
 }
 
+async function openLessonPdf(
+  artifactId: string,
+  disposition: "inline" | "attachment",
+  onError: (message: string) => void,
+) {
+  try {
+    const { url } = await teacherApi.accessLessonPdf(artifactId, disposition);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.target = disposition === "inline" ? "_blank" : "_self";
+    anchor.rel = "noopener noreferrer";
+    if (disposition === "attachment") anchor.download = "";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  } catch (error) {
+    onError(getApiErrorMessage(error, "Không thể mở PDF bài học."));
+  }
+}
+
 function Coverage({ draft }: { draft?: Record<string, unknown> }) {
   const coverage = draft?.coverage as Record<string, unknown> | undefined;
   const percent = typeof coverage?.coverage === "number" ? Math.round(coverage.coverage * 100) : null;
@@ -229,26 +315,43 @@ function MasteryArcMatrix({
   problems,
   completeArcIds,
   rejected,
+  guidance,
   onToggle,
+  onGuidanceChange,
   kind,
 }: {
   matrix: BlueprintModel;
   problems: Map<string, ProblemView>;
   completeArcIds: string[];
   rejected: Set<string>;
+  guidance: Record<string, RegenerationGuidance>;
   onToggle: (id: string) => void;
+  onGuidanceChange: (id: string, field: keyof RegenerationGuidance, value: string) => void;
   kind: string;
 }) {
+  const firstReadyArc = matrix.arcs.find((arc) => completeArcIds.includes(arc.arc_id));
+  const [selectedArcId, setSelectedArcId] = useState(firstReadyArc?.arc_id || matrix.arcs[0]?.arc_id || "");
+  const selectedArc = matrix.arcs.find((arc) => arc.arc_id === selectedArcId) || matrix.arcs[0];
+  const selectedArcIndex = Math.max(0, matrix.arcs.findIndex((arc) => arc.arc_id === selectedArc?.arc_id));
+  const selectedSlots = selectedArc
+    ? matrix.slotSequence.map((expected) => matrix.slots.find(
+      (slot) => slot.arc_id === selectedArc.arc_id && slot.position === expected.position,
+    ))
+    : [];
+  const selectedComplete = selectedArc ? completeArcIds.includes(selectedArc.arc_id) : false;
+
   return (
     <section id="session-2-mastery" className="draft-review-section mastery-arc-review">
       <header>
         <div>
           <span>Session 2</span>
-          <h2>Ma trận mastery P1-P4</h2>
+          <h2>Hành trình luyện tập</h2>
         </div>
-        <small>{completeArcIds.length} arc sẵn sàng</small>
+        <small>{completeArcIds.length}/{matrix.arcs.length} arc sẵn sàng</small>
       </header>
-      <div className="mastery-arc-grid">
+      <p className="mastery-arc-intro">So sánh lộ trình, sau đó mở từng arc để đọc và duyệt bốn bài theo đúng thứ tự học sinh sẽ làm.</p>
+
+      <div className="mastery-arc-switcher" role="group" aria-label="Chọn arc để review">
         {matrix.arcs.map((arc, index) => {
           const arcSlots = matrix.slotSequence.map((expected) =>
             matrix.slots.find(
@@ -256,44 +359,70 @@ function MasteryArcMatrix({
             ),
           );
           const complete = completeArcIds.includes(arc.arc_id);
+          const availableCount = arcSlots.filter((slot) => slot?.problem_id && problems.has(slot.problem_id)).length;
+          const rejectedCount = arcSlots.filter((slot) => {
+            const problem = slot?.problem_id ? problems.get(slot.problem_id) : undefined;
+            return Boolean(problem && rejected.has(problem.id));
+          }).length;
           return (
-            <article key={arc.arc_id} className="mastery-arc-card" data-complete={complete}>
-              <header>
-                <div>
-                  <span>Arc {index + 1}{arc.difficulty_tier ? ` · ${tierLabel(arc.difficulty_tier)}` : ""}</span>
-                  <h3>{complete ? "Sẵn sàng xuất bản" : "Còn thiếu slot"}</h3>
-                </div>
-                <b>{arcSlots.filter((slot) => slot?.problem_id && problems.has(slot.problem_id)).length}/4</b>
-              </header>
-              <div className="mastery-slot-grid">
+            <button
+              type="button"
+              key={arc.arc_id}
+              className="mastery-arc-option"
+              data-active={selectedArc?.arc_id === arc.arc_id}
+              data-complete={complete}
+              aria-pressed={selectedArc?.arc_id === arc.arc_id}
+              onClick={() => setSelectedArcId(arc.arc_id)}
+            >
+              <span className="mastery-arc-option-head">
+                <span><small>Arc {index + 1}</small><strong>{arc.difficulty_tier ? tierLabel(arc.difficulty_tier) : "Luyện tập"}</strong></span>
+                <span className="mastery-arc-option-status" data-warning={rejectedCount > 0 || !complete}>
+                  {rejectedCount > 0 ? `${rejectedCount} cần thay` : complete ? `${availableCount}/4 bài` : `Thiếu ${4 - availableCount} bài`}
+                </span>
+              </span>
+              <span className="mastery-arc-step-preview" aria-hidden="true">
                 {arcSlots.map((slot, slotIndex) => {
                   const position = slot?.position || matrix.slotSequence[slotIndex]?.position || `P${slotIndex + 1}`;
                   const problem = slot?.problem_id ? problems.get(slot.problem_id) : undefined;
-                  return (
-                    <div key={slot?.slot_id || `${arc.arc_id}:${position}`} className="mastery-slot-card" data-missing={!problem}>
-                      <div className="mastery-slot-head">
-                        <span>{position}</span>
-                        <div>
-                          <strong>{slotLabel(kind, position, slot?.role || matrix.slotSequence[slotIndex]?.role)}</strong>
-                          <small>{readableSkill(slot?.primary_skill_id || "")}</small>
-                        </div>
-                      </div>
-                      {problem ? (
-                        <DraftProblemList problems={[problem]} rejected={rejected} onToggle={onToggle} />
-                      ) : (
-                        <div className="mastery-slot-empty">
-                          <WarningCircle size={18} />
-                          <span>Chưa có bài cho slot này</span>
-                        </div>
-                      )}
-                    </div>
-                  );
+                  return <span key={slot?.slot_id || `${arc.arc_id}:${position}`} data-missing={!problem} data-rejected={Boolean(problem && rejected.has(problem.id))}><b>{position}</b><small>{slotLabel(kind, position, slot?.role || matrix.slotSequence[slotIndex]?.role)}</small></span>;
                 })}
-              </div>
-            </article>
+              </span>
+            </button>
           );
         })}
       </div>
+
+      {selectedArc ? <div className="mastery-arc-inspector">
+        <header>
+          <div>
+            <span>Arc {selectedArcIndex + 1}{selectedArc.difficulty_tier ? ` / ${tierLabel(selectedArc.difficulty_tier)}` : ""}</span>
+            <h3>Bốn bước trong hành trình</h3>
+          </div>
+          <p>{selectedComplete ? "Đủ 4 bài để duyệt" : "Arc này chưa đủ 4 bài"}</p>
+        </header>
+        <div className="mastery-problem-sequence">
+          {selectedSlots.map((slot, slotIndex) => {
+            const position = slot?.position || matrix.slotSequence[slotIndex]?.position || `P${slotIndex + 1}`;
+            const problem = slot?.problem_id ? problems.get(slot.problem_id) : undefined;
+            const role = slotLabel(kind, position, slot?.role || matrix.slotSequence[slotIndex]?.role);
+            return (
+              <div key={slot?.slot_id || `${selectedArc.arc_id}:${position}`} className="mastery-problem-row" data-missing={!problem} data-rejected={Boolean(problem && rejected.has(problem.id))}>
+                <div className="mastery-step-rail">
+                  <span>{position}</span>
+                  <div><strong>{role}</strong><small>{skillDisplayName(slot?.primary_skill_id || "")}</small></div>
+                </div>
+                <div className="mastery-problem-content">
+                  {problem ? (
+                    <DraftProblemList problems={[problem]} rejected={rejected} guidance={guidance} onToggle={onToggle} onGuidanceChange={onGuidanceChange} />
+                  ) : (
+                    <div className="mastery-slot-empty"><WarningCircle size={18} /><span>Chưa có bài cho bước này</span></div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div> : null}
     </section>
   );
 }
@@ -311,7 +440,7 @@ function BlueprintSummary({ draft, completeArcCount, missingSlotCount }: { draft
     <p>{guaranteed ? `${completeArcCount} arc P1-P4 đã sẵn sàng cho học sinh.` : "Chưa có arc P1-P4 hoàn chỉnh để bắt đầu."}</p>
     {missingSlotCount > 0 && <p>{missingSlotCount} slot còn thiếu, hiển thị như notice.</p>}
     <dl>
-      {skills.map((item) => <div key={String(item.skill_id)}><dt>{readableSkill(String(item.skill_id))}</dt><dd>{Number(item.pool_count || 0)}/{Number(item.required_pool_count || 0)} bài</dd></div>)}
+      {skills.map((item) => <div key={String(item.skill_id)}><dt>{skillDisplayName(String(item.skill_id))}</dt><dd>{Number(item.pool_count || 0)}/{Number(item.required_pool_count || 0)} bài</dd></div>)}
     </dl>
     <p>{Number(counts?.source_exact || 0)} trích nguyên · {Number(counts?.source_converted || 0)} chuyển thành trắc nghiệm · {Number(counts?.source_derived || 0)} biến thể · {Number(counts?.ai_generated || 0)} AI tự soạn</p>
   </section>;
@@ -393,15 +522,15 @@ function slotLabel(kind: string, position: string, role?: string) {
     if (position === "P4") return "Thử thách nhỏ";
   }
   if (kind === "advanced") {
-    if (position === "P1") return "Challenge 1";
-    if (position === "P2") return "Challenge 2";
-    if (position === "P3") return "The Break";
-    if (position === "P4") return "The Build";
+    if (position === "P1") return "Thử thách 1";
+    if (position === "P2") return "Thử thách 2";
+    if (position === "P3") return "Đổi góc nhìn";
+    if (position === "P4") return "Mở rộng";
   }
-  if (position === "P1") return "The Warm-Up";
-  if (position === "P2") return "The Push";
-  if (position === "P3") return "The Break";
-  if (position === "P4") return "The Build";
+  if (position === "P1") return "Khởi động";
+  if (position === "P2") return "Tăng tải";
+  if (position === "P3") return "Đổi góc nhìn";
+  if (position === "P4") return "Vận dụng lại";
   return role || "Mastery";
 }
 
@@ -426,5 +555,4 @@ function toggleSet(current: Set<string>, id: string) { const next = new Set(curr
 function defaultDeadline() { const date = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); date.setMinutes(0, 0, 0); return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16); }
 function asRecord(value: unknown): Record<string, unknown> | null { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null; }
 function isRecord(value: unknown): value is Record<string, unknown> { return Boolean(asRecord(value)); }
-function readableSkill(value: string) { return (value.split("#").pop() || value).replace(/[-_]+/g, " "); }
 function tierLabel(tier: "easy" | "medium" | "hard") { return { easy: "Cơ bản", medium: "Vừa sức", hard: "Nâng cao" }[tier]; }
