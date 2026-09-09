@@ -25,7 +25,12 @@ export function normalizeMathMarkdown(value: string | null | undefined) {
 /** Answers are often returned as bare TeX because the entire field is mathematical. */
 export function normalizeMathAnswer(value: string | null | undefined) {
   const normalized = normalizeMathMarkdown(value).trim();
-  if (!normalized || hasMathDelimiter(normalized) || !looksLikeTex(normalized)) return normalized;
+  if (
+    !normalized ||
+    hasMathDelimiter(normalized) ||
+    hasNaturalLanguage(normalized) ||
+    !looksLikeTex(normalized)
+  ) return normalized;
   return `$$\n${normalized}\n$$`;
 }
 
@@ -35,4 +40,11 @@ function hasMathDelimiter(value: string) {
 
 function looksLikeTex(value: string) {
   return /\\(?:frac|dfrac|tfrac|sqrt|left|right|cdot|times|div|pm|neq|leq|geq|sum|prod|int|sin|cos|tan|log|ln|alpha|beta|theta|pi|begin|overline|underline|vec|mathbf|mathrm)\b|[_^](?:\{[^}]+\}|[A-Za-z0-9()+-])/.test(value);
+}
+
+function hasNaturalLanguage(value: string) {
+  const withoutCommands = value.replace(/\\[A-Za-z]+/g, "");
+  const words = withoutCommands.match(/\p{L}{2,}/gu) || [];
+  const mathWords = new Set(["sqrt", "sin", "cos", "tan", "log", "ln"]);
+  return words.some((word) => !mathWords.has(word.toLowerCase()));
 }
