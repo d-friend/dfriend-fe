@@ -74,9 +74,11 @@ export function TeacherShell({ children }: { children: ReactNode }) {
 
   const recoveredNotifications = useMemo(
     () => (reportsQuery.data || [])
-      .filter((report) => report.status === "REPORT_READY" && !report.acknowledgedAt)
-      .filter((report) => !openedReportIds.includes(report.reportId || report.lessonId))
-      .map(reportNotification),
+      .filter((report) =>
+        report.status === "FAILED" ||
+        (report.status === "REPORT_READY" && !report.acknowledgedAt && !openedReportIds.includes(report.reportId || report.lessonId)),
+      )
+      .map((report) => report.status === "FAILED" ? reportFailureNotification(report) : reportNotification(report)),
     [openedReportIds, reportsQuery.data],
   );
   const notifications = useMemo(
@@ -431,6 +433,21 @@ function reportNotification(report: CopilotReportSummary): TeacherNotification {
     lessonId: report.reportId || report.lessonId,
     path: classId ? `/teacher/classes/${classId}?tab=reports&report=${report.reportId || report.lessonId}` : "/teacher/classes?tab=reports",
     createdAt: report.reportedAt || new Date().toISOString(),
+  };
+}
+
+function reportFailureNotification(report: CopilotReportSummary): TeacherNotification {
+  const classId = report.classId || report.classIds?.[0];
+  const selectionId = report.publicationId || report.lessonId;
+  return {
+    title: "Phân tích báo cáo thất bại",
+    message: `Không thể tạo báo cáo cho bài "${report.title}". Bấm để mở và chạy lại.`,
+    type: "COPILOT_REPORT_FAILED",
+    lessonId: selectionId,
+    path: classId
+      ? `/teacher/classes/${classId}?tab=reports&report=${selectionId}`
+      : "/teacher/classes?tab=reports",
+    createdAt: report.reportedAt || report.publishedAt,
   };
 }
 

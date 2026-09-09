@@ -28,6 +28,7 @@ import type { StudyProblem, StudySession } from "@/types/contracts";
 
 type ChatMessage = { id: string; role: "student" | "buddy"; content: string; degraded?: boolean };
 type SessionUiState = "initialising" | "idle" | "streaming" | "awaiting_reasoning" | "clarifying" | "farming" | "degraded" | "closing";
+type StudyChoice = { label: string; content: string };
 
 const ROLE_LABELS: Record<string, string> = {
   reinforcement: "The Warm-Up · Chứng minh điều vừa học",
@@ -91,9 +92,10 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
   const problems = session?.problems || [];
   const followUp = lessonKind !== "main";
   const currentProblem = problems.find((item) => item.problem_id === activeProblemId) || problems[0];
-  const answerChoices = currentProblem
-    ? choiceLabelsFromQuestion(currentProblem.question)
-    : [];
+  const displayedQuestion = currentProblem
+    ? splitStudyQuestionChoices(currentProblem.question)
+    : { stem: "", choices: [] };
+  const answerChoices = displayedQuestion.choices.map((choice) => choice.label);
   const { completedCount, allComplete } = deriveStudyProgress(problems, session);
   const currentProblemIndex = currentProblem
     ? problems.findIndex((item) => item.problem_id === currentProblem.problem_id)
@@ -208,7 +210,19 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
                   <span>Bài {currentProblemIndex + 1} / {problems.length}</span>
                   <strong>{currentRoleLabel}</strong>
                 </header>
-                <MathContent>{currentProblem.question}</MathContent>
+                <div className="study-problem-statement">
+                  <MathContent>{displayedQuestion.stem}</MathContent>
+                  {displayedQuestion.choices.length ? (
+                    <ol className="study-problem-choices" type="A">
+                      {displayedQuestion.choices.map((choice) => (
+                        <li key={choice.label}>
+                          <span className="study-choice-label">{choice.label}.</span>
+                          <MathContent answer>{choice.content}</MathContent>
+                        </li>
+                      ))}
+                    </ol>
+                  ) : null}
+                </div>
               </article>
               <div className="scratchpad"><label htmlFor="scratchpad"><PencilSimpleLine size={18} /> Nháp của bạn</label><textarea id="scratchpad" value={scratchpads[currentProblem.problem_id] || ""} onChange={(event) => setScratchpads((current) => ({ ...current, [currentProblem.problem_id]: event.target.value }))} placeholder="Ghi các bước, thử phép tính hoặc viết điều bạn đang nghĩ..." /></div>
             </div>
@@ -239,7 +253,28 @@ function MountainProgress({ problems, completedCount, currentProblemId, waiting 
     })}
   </div>;
 }
-function choiceLabelsFromQuestion(question: string) { const labels = Array.from(question.matchAll(/(?:^|\s)([A-D])\s*[.)\]:：]\s*/gi), (match) => match[1].toUpperCase()); const unique = Array.from(new Set(labels)); return unique.length >= 3 ? unique : []; }
+export function splitStudyQuestionChoices(question: string): { stem: string; choices: StudyChoice[] } {
+  const normalized = question.replace(/\\n(?=\s*[A-D]\s*[.)\]:：=])/gi, "\n");
+  const matches = Array.from(normalized.matchAll(/(?:^|\s)([A-D])\s*[.)\]:：=]\s*/gi));
+  const labels = matches.map((match) => match[1].toUpperCase());
+  const sequential = labels.every((label, index) => label === String.fromCharCode(65 + index));
+  if (matches.length < 3 || matches.length > 4 || !sequential) {
+    return { stem: normalized, choices: [] };
+  }
+
+  const choices = matches.map((match, index) => ({
+    label: labels[index],
+    content: normalized
+      .slice((match.index || 0) + match[0].length, matches[index + 1]?.index ?? normalized.length)
+      .trim(),
+  }));
+  if (choices.some((choice) => !choice.content)) return { stem: normalized, choices: [] };
+
+  return {
+    stem: normalized.slice(0, matches[0].index).trim(),
+    choices,
+  };
+}
 function TypingPlaceholder() { return <span className="typing-placeholder"><i /><i /><i /></span>; }
 function StateNotice({ type }: { type: "reasoning" | "clarifying" | "farming" | "degraded" }) { const copy = type === "reasoning" ? ["Cần thêm lập luận", "Đáp án có tín hiệu đúng, nhưng Study Buddy cần nghe cách bạn suy nghĩ trước khi đi tiếp."] : type === "clarifying" ? ["Chưa đủ chắc để chấm", "Study Buddy sẽ hỏi lại thay vì đoán. Bài và tiến độ hiện tại được giữ nguyên."] : type === "farming" ? ["Tiến độ chưa thay đổi", "Thử chậm lại và giải thích một bước. Đường lên đỉnh sẽ chỉ tiến khi phần học được xác nhận."] : ["Phản hồi bị gián đoạn", "Nội dung đã nhận vẫn được giữ. Bạn có thể gửi lại khi kết nối ổn định."]; return <div className="buddy-state-notice"><WarningCircle size={20} /><div><strong>{copy[0]}</strong><span>{copy[1]}</span></div></div>; }
 function StudyLoading() { return <div className="study-layout"><div className="problem-pane"><div className="student-skeleton m-6" /></div><div className="buddy-pane"><div className="student-skeleton m-6" /></div></div>; }
