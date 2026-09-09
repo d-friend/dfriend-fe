@@ -31,6 +31,15 @@ import { getApiErrorMessage, teacherApi } from "@/lib/api-client";
 import { skillDisplayName, skillLabelMap } from "@/lib/skill-labels";
 import type { ClassTab, CopilotReportDetail, CopilotReportSummary, TeacherReportAction, TeacherReportApplication, TeacherReportEffect, TeacherRoadmapItem, TeacherSubmission } from "@/types/contracts";
 
+type ClassLessonItem = TeacherRoadmapItem & {
+  lessonKind?: "main" | "remedial" | "advanced";
+  parentPublicationId?: string | null;
+  reportSelectionId?: string;
+  reportStatus?: CopilotReportSummary["status"];
+  targetStudentCount?: number;
+  publishedAt?: string;
+};
+
 export function ClassWorkspace({ classId }: { classId: string }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -109,14 +118,21 @@ export function ClassWorkspace({ classId }: { classId: string }) {
       report.classIds?.includes(classId) || report.classNames.split(",").map((name) => name.trim()).includes(currentClass.class_name),
     );
   }, [reportsQuery.data, currentClass, classId]);
+  const classLessons = useMemo(
+    () => mergeClassLessons(roadmapQuery.data || [], classReports),
+    [roadmapQuery.data, classReports],
+  );
   const selectedReportSummary = classReports.find(
     (report) =>
       selectedReport !== null && reportSelectionIds(report).includes(selectedReport),
   );
-  const selectedReportLesson = roadmapQuery.data?.find(
+  const selectedReportLesson = classLessons.find(
     (lesson) =>
       lesson.id === selectedReportSummary?.publicationId ||
       lesson.lessonId === selectedReportSummary?.lessonId,
+  );
+  const selectedLessonItem = classLessons.find(
+    (lesson) => lesson.id === selectedLesson || lesson.lessonId === selectedLesson,
   );
 
   const filteredStudents = useMemo(() => {
@@ -158,7 +174,7 @@ export function ClassWorkspace({ classId }: { classId: string }) {
 
         <nav className="class-tabs" aria-label="Nội dung lớp học">
           <button data-active={tab === "students"} onClick={() => navigate("students")}><UsersThree size={17} /> Học sinh <span>{studentsQuery.data?.length || 0}</span></button>
-          <button data-active={tab === "learning-path"} onClick={() => navigate("learning-path")}><BookOpenText size={17} /> Lộ trình <span>{roadmapQuery.data?.length || 0}</span></button>
+          <button data-active={tab === "learning-path"} onClick={() => navigate("learning-path")}><BookOpenText size={17} /> Lộ trình <span>{classLessons.length}</span></button>
           <button data-active={tab === "reports"} onClick={() => navigate("reports")}><ClipboardText size={17} /> Báo cáo <span>{classReports.length}</span></button>
         </nav>
 
@@ -167,7 +183,7 @@ export function ClassWorkspace({ classId }: { classId: string }) {
             <StudentList query={query} setQuery={setQuery} loading={studentsQuery.isLoading} error={studentsQuery.error} students={filteredStudents} selected={selectedStudent} onSelect={(id) => navigate("students", { type: "student", id })} />
           )}
           {tab === "learning-path" && (
-            <LessonList loading={roadmapQuery.isLoading} error={roadmapQuery.error} lessons={roadmapQuery.data || []} selected={selectedLesson} studentCount={currentClass.student_count} onSelect={(id) => navigate("learning-path", { type: "lesson", id })} />
+            <LessonList loading={roadmapQuery.isLoading} error={roadmapQuery.error} lessons={classLessons} selected={selectedLesson} studentCount={currentClass.student_count} onSelect={(id) => navigate("learning-path", { type: "lesson", id })} onSelectReport={(id) => navigate("reports", { type: "report", id })} />
           )}
           {tab === "reports" && (
             <ReportList loading={reportsQuery.isLoading} error={reportsQuery.error} reports={classReports} selected={selectedReport} onSelect={(id) => navigate("reports", { type: "report", id })} />
@@ -190,7 +206,7 @@ export function ClassWorkspace({ classId }: { classId: string }) {
 
       <aside className="class-detail" aria-label="Chi tiết">
         {hasSelection && <button className="detail-back" onClick={clearSelection}><ArrowLeft size={17} /> Quay lại danh sách</button>}
-        {selectedStudent ? <StudentDetail classId={classId} studentId={selectedStudent} studentName={studentsQuery.data?.find((student) => student.student_id === selectedStudent)?.full_name || "Học sinh"} /> : selectedLesson ? <LessonDetail lesson={roadmapQuery.data?.find((lesson) => lesson.id === selectedLesson || lesson.lessonId === selectedLesson)} studentCount={currentClass.student_count} /> : selectedReport ? <ReportDetail summary={selectedReportSummary} classId={classId} completedCount={selectedReportSummary?.completedStudents ?? selectedReportLesson?.completedCount ?? 0} studentCount={selectedReportSummary?.totalStudents ?? currentClass.student_count} /> : <DetailEmpty tab={tab} />}
+        {selectedStudent ? <StudentDetail classId={classId} studentId={selectedStudent} studentName={studentsQuery.data?.find((student) => student.student_id === selectedStudent)?.full_name || "Học sinh"} /> : selectedLesson ? <LessonDetail lesson={selectedLessonItem} studentCount={currentClass.student_count} onSelectReport={(id) => navigate("reports", { type: "report", id })} /> : selectedReport ? <ReportDetail summary={selectedReportSummary} classId={classId} completedCount={selectedReportSummary?.completedStudents ?? selectedReportLesson?.completedCount ?? 0} studentCount={selectedReportSummary?.totalStudents ?? currentClass.student_count} /> : <DetailEmpty tab={tab} />}
       </aside>
 
       <AnimatePresence>{addStudentsOpen && <AddStudentsSheet classId={classId} onClose={() => setAddStudentsOpen(false)} />}</AnimatePresence>
@@ -207,11 +223,29 @@ function StudentList({ query, setQuery, loading, error, students, selected, onSe
   );
 }
 
-function LessonList({ loading, error, lessons, selected, studentCount, onSelect }: { loading: boolean; error: unknown; lessons: TeacherRoadmapItem[]; selected: string | null; studentCount: number; onSelect: (id: string) => void }) {
+function LessonList({ loading, error, lessons, selected, studentCount, onSelect, onSelectReport }: { loading: boolean; error: unknown; lessons: ClassLessonItem[]; selected: string | null; studentCount: number; onSelect: (id: string) => void; onSelectReport: (id: string) => void }) {
   if (loading) return <ListSkeleton />;
   if (error) return <ListError error={error} />;
   if (!lessons.length) return <ListEmpty icon={<BookOpenText size={26} />} title="Chưa có bài học" body="Tạo bài học đầu tiên để bắt đầu lộ trình của lớp." action={<Link className="primary-button" href="/teacher/lessons/new">Tạo bài học</Link>} />;
-  return <div className="lesson-path">{lessons.map((lesson, index) => { const progress = studentCount ? Math.round((lesson.completedCount / studentCount) * 100) : 0; return <button key={lesson.id} data-selected={selected === lesson.id || selected === lesson.lessonId} onClick={() => onSelect(lesson.id)}><span className="path-node">{index + 1}</span><span className="entity-main"><small>{index === 0 ? "Bài học hiện tại" : `Bài học ${index + 1}`}</small><strong>{lesson.title}</strong><span>{lesson.questionsCount} câu hỏi</span></span><span className="lesson-progress"><strong>{progress}%</strong><small>{lesson.completedCount}/{studentCount} hoàn thành</small></span></button>; })}</div>;
+  const mainLessons = lessons.filter((lesson) => lesson.lessonKind !== "remedial" && lesson.lessonKind !== "advanced");
+  const followUps = lessons.filter((lesson) => lesson.lessonKind === "remedial" || lesson.lessonKind === "advanced");
+  const mainIds = new Set(mainLessons.map((lesson) => lesson.id));
+  const orphanFollowUps = followUps.filter((lesson) => !lesson.parentPublicationId || !mainIds.has(lesson.parentPublicationId));
+  return <div className="lesson-path">{mainLessons.map((lesson, index) => {
+    const targetCount = lesson.targetStudentCount ?? studentCount;
+    const progress = targetCount ? Math.round((lesson.completedCount / targetCount) * 100) : 0;
+    const children = followUps.filter((followUp) => followUp.parentPublicationId === lesson.id);
+    return <div className="lesson-family" key={lesson.id}><button className="lesson-main-row" data-selected={selected === lesson.id || selected === lesson.lessonId} onClick={() => onSelect(lesson.id)}><span className="path-node">{index + 1}</span><span className="entity-main"><small>{index === 0 ? "Bài học hiện tại" : `Bài học ${index + 1}`}</small><strong>{lesson.title}</strong><span>{lesson.questionsCount} câu hỏi</span></span><span className="lesson-progress"><strong>{progress}%</strong><small>{lesson.completedCount}/{targetCount} hoàn thành</small></span></button>{children.length ? <FollowUpLessonRows lessons={children} selected={selected} onSelect={onSelect} onSelectReport={onSelectReport} /> : null}</div>;
+  })}{orphanFollowUps.length ? <section className="orphan-follow-up-family"><div className="follow-up-family-heading"><strong>Follow-up</strong><span>Bài luyện thêm của lớp</span></div><FollowUpLessonRows lessons={orphanFollowUps} selected={selected} onSelect={onSelect} onSelectReport={onSelectReport} /></section> : null}</div>;
+}
+
+function FollowUpLessonRows({ lessons, selected, onSelect, onSelectReport }: { lessons: ClassLessonItem[]; selected: string | null; onSelect: (id: string) => void; onSelectReport: (id: string) => void }) {
+  return <section className="follow-up-lesson-list" aria-label="Bài học follow-up">{lessons.map((lesson) => {
+    const targetCount = lesson.targetStudentCount || 0;
+    const progress = targetCount ? Math.round((lesson.completedCount / targetCount) * 100) : 0;
+    const kindLabel = lesson.lessonKind === "remedial" ? "Phụ đạo" : "Nâng cao";
+    return <div className="follow-up-lesson-row" data-selected={selected === lesson.id || selected === lesson.lessonId} key={lesson.id}><button className="follow-up-lesson-main" onClick={() => onSelect(lesson.id)}><span className="follow-up-node">{lesson.lessonKind === "remedial" ? "R" : "A"}</span><span className="entity-main"><small>{kindLabel} · publish {formatDate(lesson.publishedAt)}</small><strong>{lesson.title}</strong><span>{lesson.completedCount}/{targetCount} học sinh hoàn thành</span></span><span className="lesson-progress"><strong>{progress}%</strong><small>{statusLabel(lesson.reportStatus || "PENDING")}</small></span></button>{lesson.reportSelectionId ? <button className="follow-up-report-link" onClick={() => onSelectReport(lesson.reportSelectionId!)}>{lesson.reportStatus === "REPORT_READY" ? "Xem báo cáo" : "Xem tiến độ"}<ArrowSquareOut size={14} /></button> : null}</div>;
+  })}</section>;
 }
 
 function ReportList({ loading, error, reports, selected, onSelect }: { loading: boolean; error: unknown; reports: CopilotReportSummary[]; selected: string | null; onSelect: (id: string) => void }) {
@@ -294,6 +328,53 @@ function reportSelectionIds(report: CopilotReportSummary) {
   );
 }
 
+function mergeClassLessons(roadmap: TeacherRoadmapItem[], reports: CopilotReportSummary[]): ClassLessonItem[] {
+  const mainReportPublicationById = new Map<string, string>();
+  for (const report of reports) {
+    if (report.reportId && report.publicationId && report.lessonKind !== "remedial" && report.lessonKind !== "advanced") {
+      mainReportPublicationById.set(report.reportId, report.publicationId);
+    }
+  }
+
+  const followUpVersions = new Map<string, CopilotReportSummary[]>();
+  for (const report of reports) {
+    if (report.lessonKind !== "remedial" && report.lessonKind !== "advanced") continue;
+    const publicationId = report.publicationId || report.lessonId;
+    const versions = followUpVersions.get(publicationId) || [];
+    versions.push(report);
+    followUpVersions.set(publicationId, versions);
+  }
+
+  const followUps = [...followUpVersions.entries()].map(([publicationId, versions]) => {
+    const summary = [...versions].sort((left, right) => {
+      const versionDelta = (right.reportVersion || 0) - (left.reportVersion || 0);
+      if (versionDelta !== 0) return versionDelta;
+      return Number(right.status === "REPORT_READY") - Number(left.status === "REPORT_READY");
+    })[0];
+    return {
+      id: publicationId,
+      lessonId: summary.lessonId,
+      title: summary.title,
+      description: "",
+      status: "active" as const,
+      type: "exercise" as const,
+      questionsCount: 0,
+      completedCount: summary.completedStudents || 0,
+      lessonKind: summary.lessonKind,
+      parentPublicationId: summary.parentPublicationId || (summary.sourceReportId ? mainReportPublicationById.get(summary.sourceReportId) : null),
+      reportSelectionId: reportSelectionId(summary),
+      reportStatus: summary.status,
+      targetStudentCount: summary.totalStudents || 0,
+      publishedAt: summary.publishedAt,
+    } satisfies ClassLessonItem;
+  }).sort((left, right) => new Date(left.publishedAt || 0).getTime() - new Date(right.publishedAt || 0).getTime());
+
+  return [
+    ...roadmap.map((lesson) => ({ ...lesson, lessonKind: "main" as const })),
+    ...followUps,
+  ];
+}
+
 function StudentDetail({ classId, studentId, studentName }: { classId: string; studentId: string; studentName: string }) {
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<"overview" | "submissions" | "activity">("overview");
@@ -343,7 +424,7 @@ function ActivityList({ items }: { items: Array<{ id?: string; eventType?: strin
   return <div className="activity-list">{items.map((item, index) => <div key={item.id || index}><span className="activity-node" /><span><strong>{activityLabel(item.eventType || item.event_type)}</strong><small>{formatDate(item.createdAt || item.created_at, true)}</small></span></div>)}</div>;
 }
 
-function LessonDetail({ lesson, studentCount }: { lesson: TeacherRoadmapItem | undefined; studentCount: number }) {
+function LessonDetail({ lesson, studentCount, onSelectReport }: { lesson: ClassLessonItem | undefined; studentCount: number; onSelectReport: (id: string) => void }) {
   const pdfAccess = useMutation({
     mutationFn: ({ artifactId, disposition }: { artifactId: string; disposition: "inline" | "attachment" }) => {
       return teacherApi.accessLessonPdf(artifactId, disposition);
@@ -360,13 +441,16 @@ function LessonDetail({ lesson, studentCount }: { lesson: TeacherRoadmapItem | u
     },
   });
   if (!lesson) return <DetailEmpty tab="learning-path" />;
-  const incomplete = Math.max(studentCount - lesson.completedCount, 0);
+  const targetCount = lesson.targetStudentCount ?? studentCount;
+  const incomplete = Math.max(targetCount - lesson.completedCount, 0);
+  const followUp = lesson.lessonKind === "remedial" || lesson.lessonKind === "advanced";
+  const detailLabel = lesson.lessonKind === "remedial" ? "Bài học phụ đạo" : lesson.lessonKind === "advanced" ? "Bài học nâng cao" : "Chi tiết bài học";
   const hook = lessonHook(lesson);
   const pdfArtifacts = [
     { label: "Bản học sinh", artifact: lesson.pdfArtifact },
     { label: "Bản giáo viên · có đáp án", artifact: lesson.teacherPdfArtifact },
   ].filter((item): item is { label: string; artifact: NonNullable<TeacherRoadmapItem["pdfArtifact"]> } => Boolean(item.artifact));
-  return <div className="detail-content"><p className="workspace-kicker">Chi tiết bài học</p><h2>{lesson.title}</h2><div className="metric-grid two"><div><span>Đã hoàn thành</span><strong>{lesson.completedCount}</strong><small>/{studentCount}</small></div><div><span>Chưa hoàn thành</span><strong>{incomplete}</strong><small>học sinh</small></div></div><section className="detail-section"><h3>Nội dung</h3>{hook?.trim() && <div className="knowledge-hook"><strong>Hook bài học</strong><MathContent>{hook}</MathContent></div>}<div className="lesson-facts"><div><span>Số câu hỏi</span><strong>{lesson.questionsCount}</strong></div><div><span>Trạng thái</span><strong>Đang mở</strong></div><div><span>Deadline</span><strong>{formatDate(lesson.deadline)}</strong></div></div></section>{pdfArtifacts.map(({ label, artifact }) => <section className="detail-section lesson-pdf-card" key={artifact.artifactId}><div className="lesson-pdf-icon"><FilePdf size={24} weight="fill" /></div><div className="lesson-pdf-copy"><h3>{label}</h3><strong>{artifact.filename}</strong><small>PDF · Bản {artifact.contentRevision} · {formatDate(artifact.createdAt, true)}</small>{pdfAccess.isError ? <span className="lesson-pdf-error">{getApiErrorMessage(pdfAccess.error, "Không thể mở PDF.")}</span> : null}</div><div className="lesson-pdf-actions"><button className="secondary-button" disabled={pdfAccess.isPending} onClick={() => pdfAccess.mutate({ artifactId: artifact.artifactId, disposition: "inline" })}><ArrowSquareOut size={16} /> Mở PDF</button><button className="text-button" disabled={pdfAccess.isPending} onClick={() => pdfAccess.mutate({ artifactId: artifact.artifactId, disposition: "attachment" })}><DownloadSimple size={16} /> Tải xuống</button></div></section>)}</div>;
+  return <div className="detail-content"><p className="workspace-kicker">{detailLabel}</p><h2>{lesson.title}</h2><div className="metric-grid two"><div><span>Đã hoàn thành</span><strong>{lesson.completedCount}</strong><small>/{targetCount}</small></div><div><span>Chưa hoàn thành</span><strong>{incomplete}</strong><small>học sinh</small></div></div>{followUp && lesson.reportSelectionId ? <section className="follow-up-report-cta"><div><strong>{statusLabel(lesson.reportStatus || "PENDING")}</strong><p>{lesson.reportStatus === "REPORT_READY" ? "Báo cáo outcome của bài follow-up đã sẵn sàng." : "Theo dõi tiến độ và chạy báo cáo khi đã có dữ liệu hoàn thành."}</p></div><button className="primary-button" onClick={() => onSelectReport(lesson.reportSelectionId!)}>{lesson.reportStatus === "REPORT_READY" ? "Xem báo cáo" : "Xem tiến độ"}<ArrowSquareOut size={15} /></button></section> : null}<section className="detail-section"><h3>Nội dung</h3>{hook?.trim() && <div className="knowledge-hook"><strong>Hook bài học</strong><MathContent>{hook}</MathContent></div>}<div className="lesson-facts">{lesson.questionsCount > 0 ? <div><span>Số câu hỏi</span><strong>{lesson.questionsCount}</strong></div> : null}<div><span>Trạng thái</span><strong>{followUp ? statusLabel(lesson.reportStatus || "PENDING") : "Đang mở"}</strong></div><div><span>{followUp ? "Đã publish" : "Deadline"}</span><strong>{formatDate(followUp ? lesson.publishedAt : lesson.deadline)}</strong></div></div></section>{pdfArtifacts.map(({ label, artifact }) => <section className="detail-section lesson-pdf-card" key={artifact.artifactId}><div className="lesson-pdf-icon"><FilePdf size={24} weight="fill" /></div><div className="lesson-pdf-copy"><h3>{label}</h3><strong>{artifact.filename}</strong><small>PDF · Bản {artifact.contentRevision} · {formatDate(artifact.createdAt, true)}</small>{pdfAccess.isError ? <span className="lesson-pdf-error">{getApiErrorMessage(pdfAccess.error, "Không thể mở PDF.")}</span> : null}</div><div className="lesson-pdf-actions"><button className="secondary-button" disabled={pdfAccess.isPending} onClick={() => pdfAccess.mutate({ artifactId: artifact.artifactId, disposition: "inline" })}><ArrowSquareOut size={16} /> Mở PDF</button><button className="text-button" disabled={pdfAccess.isPending} onClick={() => pdfAccess.mutate({ artifactId: artifact.artifactId, disposition: "attachment" })}><DownloadSimple size={16} /> Tải xuống</button></div></section>)}</div>;
 }
 
 function lessonHook(lesson: TeacherRoadmapItem) {
