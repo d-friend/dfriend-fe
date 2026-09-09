@@ -38,9 +38,8 @@ const ROLE_LABELS: Record<string, string> = {
 
 export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
   const router = useRouter();
-  const followUp = lessonId.startsWith("extra_");
-  const parentLessonId = followUp ? lessonId.slice("extra_".length) : lessonId;
   const queryClient = useQueryClient();
+  const [lessonKind, setLessonKind] = useState<"main" | "remedial" | "advanced">("main");
   const [session, setSession] = useState<StudySession | null>(null);
   const [sessionError, setSessionError] = useState("");
   const [uiState, setUiState] = useState<SessionUiState>("initialising");
@@ -63,6 +62,7 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
       // earlier attempt. The current close will write a fresh summary.
       sessionStorage.removeItem(`dfriend:feedback:${lessonId}`);
       const lesson = await studentApi.exercise(lessonId);
+      setLessonKind(lesson.lessonKind || "main");
       const taxonomyVersion = Number(lesson.taxonomyVersion);
       if (!Number.isInteger(taxonomyVersion) || taxonomyVersion < 1) {
         throw new Error("Bài học chưa có taxonomy version hợp lệ.");
@@ -89,6 +89,7 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
   }, [message]);
 
   const problems = session?.problems || [];
+  const followUp = lessonKind !== "main";
   const currentProblem = problems.find((item) => item.problem_id === activeProblemId) || problems[0];
   const answerChoices = currentProblem
     ? choiceLabelsFromQuestion(currentProblem.question)
@@ -183,12 +184,12 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
     }
   }
 
-  if (sessionError && !session) return <SessionStartError message={sessionError} retry={initialise} lessonId={lessonId} followUp={followUp} parentLessonId={parentLessonId} />;
+  if (sessionError && !session) return <SessionStartError message={sessionError} retry={initialise} lessonId={lessonId} followUp={followUp} />;
 
   return (
     <div className="learning-shell study-shell">
       <header className="learning-header study-header">
-        <Link href={followUp ? `/student/report/${parentLessonId}` : `/student/lesson/${lessonId}/part1`}><ArrowLeft size={19} /><span>{followUp ? "Feedback trước" : "Session 1"}</span></Link>
+        <Link href={`/student/lesson/${lessonId}/part1`}><ArrowLeft size={19} /><span>Session 1</span></Link>
         <div className="study-header-center"><span><Mountains size={16} weight="fill" /> Đường lên đỉnh</span><MountainProgress problems={problems} completedCount={completedCount} currentProblemId={activeProblemId} waiting={uiState === "awaiting_reasoning" || uiState === "farming"} /></div>
         <div className="study-header-actions">
           {!allComplete && session?.session_id ? <button type="button" className="study-early-finish" onClick={() => void closeSession(true)} disabled={uiState === "streaming" || uiState === "closing"}><Flag size={14} weight="fill" /><span>{uiState === "closing" ? "Đang tổng hợp" : "Kết thúc sớm"}</span></button> : null}
@@ -242,4 +243,4 @@ function choiceLabelsFromQuestion(question: string) { const labels = Array.from(
 function TypingPlaceholder() { return <span className="typing-placeholder"><i /><i /><i /></span>; }
 function StateNotice({ type }: { type: "reasoning" | "clarifying" | "farming" | "degraded" }) { const copy = type === "reasoning" ? ["Cần thêm lập luận", "Đáp án có tín hiệu đúng, nhưng Study Buddy cần nghe cách bạn suy nghĩ trước khi đi tiếp."] : type === "clarifying" ? ["Chưa đủ chắc để chấm", "Study Buddy sẽ hỏi lại thay vì đoán. Bài và tiến độ hiện tại được giữ nguyên."] : type === "farming" ? ["Tiến độ chưa thay đổi", "Thử chậm lại và giải thích một bước. Đường lên đỉnh sẽ chỉ tiến khi phần học được xác nhận."] : ["Phản hồi bị gián đoạn", "Nội dung đã nhận vẫn được giữ. Bạn có thể gửi lại khi kết nối ổn định."]; return <div className="buddy-state-notice"><WarningCircle size={20} /><div><strong>{copy[0]}</strong><span>{copy[1]}</span></div></div>; }
 function StudyLoading() { return <div className="study-layout"><div className="problem-pane"><div className="student-skeleton m-6" /></div><div className="buddy-pane"><div className="student-skeleton m-6" /></div></div>; }
-function SessionStartError({ message, retry, lessonId, followUp, parentLessonId }: { message: string; retry: () => void; lessonId: string; followUp: boolean; parentLessonId: string }) { return <div className="learning-error"><ChatCircleDots size={38} /><h1>{followUp ? "Bài luyện thêm chưa sẵn sàng" : "Session 2 chưa sẵn sàng"}</h1><p>{message}</p><div><Link className="student-secondary-button" href={followUp ? `/student/report/${parentLessonId}` : `/student/lesson/${lessonId}/part1`}>{followUp ? "Về feedback trước" : "Về Session 1"}</Link><button className="student-primary-button" onClick={retry}>Thử lại</button></div></div>; }
+function SessionStartError({ message, retry, lessonId, followUp }: { message: string; retry: () => void; lessonId: string; followUp: boolean }) { return <div className="learning-error"><ChatCircleDots size={38} /><h1>{followUp ? "Bài follow-up chưa sẵn sàng" : "Session 2 chưa sẵn sàng"}</h1><p>{message}</p><div><Link className="student-secondary-button" href={`/student/lesson/${lessonId}/part1`}>Về Session 1</Link><button className="student-primary-button" onClick={retry}>Thử lại</button></div></div>; }

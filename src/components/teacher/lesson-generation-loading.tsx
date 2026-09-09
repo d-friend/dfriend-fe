@@ -1,21 +1,22 @@
 import { Sparkle } from "@phosphor-icons/react";
 import type { CSSProperties } from "react";
 
-const generationSteps = [
-  "Chốt kỹ năng và mục tiêu",
-  "Soạn Session 1",
-  "Dựng 3 mạch luyện tập",
-  "Kiểm tra 12 slot độc lập",
-  "Lưu bản review",
-];
-
 export function LessonGenerationLoading({
   origin,
   detail,
+  lessonKind = "main",
 }: {
   origin: "copilot" | "wizard";
   detail?: string;
+  lessonKind?: "main" | "remedial" | "advanced";
 }) {
+  const generationSteps = [
+    "Chốt kỹ năng và mục tiêu",
+    "Soạn Session 1",
+    lessonKind === "main" ? "Dựng 3 mạch luyện tập" : "Dựng 2 mạch luyện tập",
+    lessonKind === "main" ? "Kiểm tra 12 slot độc lập" : "Kiểm tra 8 slot độc lập",
+    "Lưu bản review",
+  ];
   return (
     <section className="lesson-generation-screen" aria-live="polite" aria-busy="true">
       <div className="lesson-generation-panel">

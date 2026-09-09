@@ -22,6 +22,8 @@ export function LessonGenerationJobWorkspace({ jobId }: { jobId: string }) {
   const [retryNonce, setRetryNonce] = useState(0);
   const enqueueError = search.get("enqueueError") || "";
   const visibleError = enqueueError || error;
+  const requestedKind = search.get("kind");
+  const lessonKind = requestedKind === "remedial" || requestedKind === "advanced" ? requestedKind : "main";
 
   useEffect(() => {
     if (enqueueError) {
@@ -123,6 +125,7 @@ export function LessonGenerationJobWorkspace({ jobId }: { jobId: string }) {
     <LessonGenerationLoading
       origin={search.get("origin") === "wizard" ? "wizard" : "copilot"}
       detail={detail}
+      lessonKind={lessonKind}
     />
   );
 }

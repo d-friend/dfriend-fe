@@ -551,6 +551,10 @@ export interface SessionOneProgress {
 export interface StudentExercise {
   id: string;
   taxonomyVersion: number;
+  aiLessonId?: string;
+  publicationId?: string | null;
+  lessonKind?: "main" | "remedial" | "advanced";
+  parentAiLessonId?: string | null;
   title: string;
   description: string;
   material?: string;
@@ -653,6 +657,7 @@ export interface PostMasteryReport {
 export interface StudentReport {
   lessonId: string;
   lessonTitle?: string | null;
+  lessonKind?: "main" | "remedial" | "advanced";
   score?: number;
   sessionProgress?: number | null;
   status?: string;
