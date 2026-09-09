@@ -24,6 +24,7 @@ import { MathContent } from "@/components/shared/math-content";
 import { studentApi, studentKeys } from "@/lib/student-api";
 import { streamStudyBuddy, type StudyStreamEvent } from "@/lib/student-stream";
 import { deriveStudyProgress } from "@/lib/study-progress";
+import { buildMasteryGreeting, companionPolicy } from "@/lib/student-companion";
 import type { StudyProblem, StudySession } from "@/types/contracts";
 
 type ChatMessage = { id: string; role: "student" | "buddy"; content: string; degraded?: boolean };
@@ -45,7 +46,7 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
   const [sessionError, setSessionError] = useState("");
   const [uiState, setUiState] = useState<SessionUiState>("initialising");
   const [lastCloseWasEarly, setLastCloseWasEarly] = useState(false);
-  const [messages, setMessages] = useState<ChatMessage[]>([{ id: "welcome", role: "buddy", content: "Mình là bạn học của bạn trong buổi này. Mình sẽ nghe cách bạn nghĩ, hỏi lại khi cần và cùng gỡ chỗ bị kẹt, nhưng không làm hộ bài." }]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [message, setMessage] = useState("");
   const [answer, setAnswer] = useState("");
   const [scratchpads, setScratchpads] = useState<Record<number, string>>({});
@@ -72,6 +73,7 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
       const value = active.status === "not_found" ? await studentApi.startSession(lessonId, taxonomyVersion) : active;
       if (!value.session_id || !value.problems?.length) throw new Error("Session 2 chưa có bài tập để bắt đầu.");
       setSession(value);
+      setMessages([{ id: "welcome", role: "buddy", content: buildMasteryGreeting(value.response_adaptation_policy) }]);
       setActiveProblemId(value.current_problem_id || value.problems[0].problem_id);
       setUiState("idle");
     } catch (error) {
@@ -90,6 +92,7 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
   }, [message]);
 
   const problems = session?.problems || [];
+  const activeCompanion = companionPolicy(session?.response_adaptation_policy);
   const followUp = lessonKind !== "main";
   const currentProblem = problems.find((item) => item.problem_id === activeProblemId) || problems[0];
   const displayedQuestion = currentProblem
@@ -230,8 +233,8 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
           </section>
 
           <section className="buddy-pane" data-mobile-active={mobileTab === "buddy"}>
-            <div className="buddy-title"><div><span className="buddy-mark"><Sparkle size={18} weight="fill" /></span><div><strong>Bạn học AI</strong><small>Gợi mở, không làm hộ</small></div></div>{uiState === "streaming" && <span className="buddy-typing">Đang đọc cách bạn nghĩ</span>}</div>
-            <div className="buddy-transcript" ref={transcriptRef}>{messages.map((item) => <article key={item.id} data-role={item.role} data-degraded={item.degraded}><span>{item.role === "buddy" ? "Study Buddy" : "Bạn"}</span>{item.content ? <MathContent>{item.content}</MathContent> : <div className="markdown-body"><TypingPlaceholder /></div>}</article>)}{uiState === "awaiting_reasoning" && <StateNotice type="reasoning" />}{uiState === "clarifying" && <StateNotice type="clarifying" />}{uiState === "farming" && <StateNotice type="farming" />}{uiState === "degraded" && <StateNotice type="degraded" />}{allComplete && <div className="summit-card"><Flag size={25} weight="fill" /><div><strong>Bạn đã tới đỉnh của phiên học</strong><span>Kết thúc để nhận phản hồi về điểm mạnh và phần nên luyện tiếp.</span></div><button className="student-primary-button" onClick={() => void closeSession()} disabled={uiState === "closing"}>{uiState === "closing" ? "Đang tổng hợp" : "Nhận feedback"}</button></div>}{sessionError && session && <div className="student-form-error" role="alert">{sessionError} <button onClick={() => void closeSession(lastCloseWasEarly)}>Thử lại</button></div>}</div>
+            <div className="buddy-title"><div><span className="buddy-mark"><Sparkle size={18} weight="fill" /></span><div><strong>{activeCompanion.companion_name}</strong><small>Bạn học AI · Gợi mở, không làm hộ</small></div></div>{uiState === "streaming" && <span className="buddy-typing">Đang đọc cách bạn nghĩ</span>}</div>
+            <div className="buddy-transcript" ref={transcriptRef}>{messages.map((item) => <article key={item.id} data-role={item.role} data-degraded={item.degraded}><span>{item.role === "buddy" ? activeCompanion.companion_name : "Bạn"}</span>{item.content ? <MathContent>{item.content}</MathContent> : <div className="markdown-body"><TypingPlaceholder /></div>}</article>)}{uiState === "awaiting_reasoning" && <StateNotice type="reasoning" />}{uiState === "clarifying" && <StateNotice type="clarifying" />}{uiState === "farming" && <StateNotice type="farming" />}{uiState === "degraded" && <StateNotice type="degraded" />}{allComplete && <div className="summit-card"><Flag size={25} weight="fill" /><div><strong>Bạn đã tới đỉnh của phiên học</strong><span>Kết thúc để nhận phản hồi về điểm mạnh và phần nên luyện tiếp.</span></div><button className="student-primary-button" onClick={() => void closeSession()} disabled={uiState === "closing"}>{uiState === "closing" ? "Đang tổng hợp" : "Nhận feedback"}</button></div>}{sessionError && session && <div className="student-form-error" role="alert">{sessionError} <button onClick={() => void closeSession(lastCloseWasEarly)}>Thử lại</button></div>}</div>
             <form className="buddy-composer" onSubmit={submitChat}><label htmlFor="buddy-message">Trao đổi cách làm</label><div><textarea ref={buddyMessageRef} id="buddy-message" rows={1} value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={handleChatKeyDown} placeholder="Mình đang nghĩ là..." disabled={uiState === "streaming" || uiState === "closing"} /><button aria-label="Gửi tin nhắn" disabled={!canSendChat}><PaperPlaneTilt size={19} weight="fill" /></button></div></form>
           </section>
         </div>

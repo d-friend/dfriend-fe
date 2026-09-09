@@ -22,7 +22,7 @@ export default function LoginPage() {
       const response = await apiClient.post<{ user?: { role?: string }; role?: string }>("/auth/login", { username, password });
       await apiClient.get("/auth/csrf-token").catch(() => null);
       const role = response.data.user?.role || response.data.role;
-      router.replace(role === "ADMIN" ? "/admin" : role === "STUDENT" ? "/student/dashboard" : "/teacher/copilot/new");
+      router.replace(role === "ADMIN" ? "/admin" : role === "STUDENT" ? "/student/onboarding" : "/teacher/copilot/new");
     } catch (loginError) {
       setError(getApiErrorMessage(loginError, "Tên đăng nhập hoặc mật khẩu không đúng."));
     } finally {

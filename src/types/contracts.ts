@@ -10,6 +10,39 @@ export interface AuthUser {
   is_beta_activated: boolean;
 }
 
+export type StudentScaffoldingPreference =
+  | "small_hint"
+  | "guided_questions"
+  | "similar_example";
+export type StudentPacePreference =
+  | "concise"
+  | "step_by_step"
+  | "intuition_first";
+export type StudentTonePreference = "calm" | "direct" | "encouraging";
+
+export interface StudentOnboarding {
+  completed: boolean;
+  version: number;
+  skipped: boolean;
+  student_display_name: string;
+  companion_name: string;
+  preferences: {
+    scaffolding: StudentScaffoldingPreference;
+    pace: StudentPacePreference;
+    tone: StudentTonePreference;
+  };
+}
+
+export interface ResponseAdaptationPolicy {
+  student_display_name: string;
+  companion_name: string;
+  preferred_representation: string[];
+  scaffolding: string;
+  pace: string;
+  challenge: string;
+  tone: string;
+}
+
 export interface AdminUser {
   id: string;
   username: string;
@@ -590,6 +623,7 @@ export interface StudySession {
   topic?: string;
   concept?: string;
   taxonomyVersion?: number;
+  response_adaptation_policy?: ResponseAdaptationPolicy;
 }
 
 export interface StudySessionSummary {

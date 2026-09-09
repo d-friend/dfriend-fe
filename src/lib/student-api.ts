@@ -6,6 +6,10 @@ import type {
   StudentClass,
   StudentExercise,
   StudentMetrics,
+  StudentOnboarding,
+  StudentPacePreference,
+  StudentScaffoldingPreference,
+  StudentTonePreference,
   StudentReport,
   StudentRoadmapItem,
   StudySession,
@@ -26,10 +30,27 @@ export const studentKeys = {
   activeSession: (lessonId: string, taxonomyVersion: number) =>
     ["student", "session", lessonId, taxonomyVersion] as const,
   report: (lessonId: string) => ["student", "report", lessonId] as const,
+  onboarding: ["student", "onboarding"] as const,
 };
 
 export const studentApi = {
   me: async () => (await apiClient.get<AuthUser>("/auth/me")).data,
+  onboarding: async () =>
+    (await apiClient.get<StudentOnboarding>("/student/me/onboarding")).data,
+  saveOnboarding: async (input: {
+    skipped: boolean;
+    studentDisplayName?: string;
+    companionName?: string;
+    scaffolding?: StudentScaffoldingPreference;
+    pace?: StudentPacePreference;
+    tone?: StudentTonePreference;
+  }) =>
+    (
+      await apiClient.patch<StudentOnboarding>(
+        "/student/me/onboarding",
+        input,
+      )
+    ).data,
   metrics: async () => (await apiClient.get<StudentMetrics>("/student/me/metrics")).data,
   classes: async () =>
     (await apiClient.get<{ classes: StudentClass[] }>("/student/me/classes")).data.classes,
