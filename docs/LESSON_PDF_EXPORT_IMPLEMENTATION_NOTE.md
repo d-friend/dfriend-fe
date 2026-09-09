@@ -12,13 +12,15 @@ Specification: `docs/LESSON_PDF_EXPORT_SPEC.md`
 - The existing `FULL_CONTENT_PDF` remains the student-safe copy. Its render contract is bumped from v1 to v2 so READY v1 files with broken formatting are not silently reused.
 - Added teacher-copy generate/status endpoints, frontend API methods, independent Draft Review actions, and two labeled document cards in Teacher Class view.
 - Teacher Class selects only student v2 and teacher v1 render contracts for the exact published revision. Student roadmap still does not query or return either artifact.
-- PDF renderer/artifact tests pass: 2 suites, 11 tests. The two Teacher Class artifact-routing tests pass independently. Frontend targeted ESLint and TypeScript checks pass. The PDF module contributes no current compile error; the repository-wide Nest build is presently blocked by 7 errors in unrelated in-progress `ai-session.service.ts` taxonomy work. The full backend suite is likewise blocked by unrelated taxonomy-version changes (7 suites / 15 tests failing, 25 suites / 216 tests passing).
-- Removed the duplicate frontend completeness gate after a real Draft Review showed PDF actions disabled while the matrix UI reported one missing problem. Export actions now defer canonical 12-problem validation to the backend, remain independent from review/publish mutations, and use unambiguous `Xuất PDF HS/GV` labels.
+- Current PDF renderer/artifact tests pass: 2 suites, 12 tests. The Nest production build, frontend targeted ESLint, TypeScript check, and diff checks pass. The full backend suite and live browser/MinIO flow were not rerun for this condition change.
+- A real export confirmed that the matrix's missing slot was genuine: the earlier exact-12 artifact gate returned `PDF_MASTERY_INCOMPLETE`. The founder then superseded that gate with the canonical lesson-publish condition. Both PDF endpoints now call AI-service publish-check for the exact revision and reject a non-publishable draft with `PDF_NOT_PUBLISHABLE` plus its blockers.
+- Draft Review enables both PDF actions under the same content conditions as Publish: current revision approved, authoritative publish-check passes, at least one complete arc, no unresolved rejection, and no mutation in progress. Class selection, title assignment, and deadline remain Publish-only delivery fields.
+- A publishable partial pool now exports every distinct blueprint-resolved Mastery problem and skips empty slots. It does not reduce the document to the single publishable arc; 12 remains the ideal generated pool, not an export blocker.
 
 ## Confirmed scope
 
 - Separate `Bản học sinh` and `Bản giáo viên` actions on Teacher Draft Review; no class picker.
-- Both PDFs contain all Knowledge, then all checkpoints, then all 12 Mastery problems in the same order.
+- Both PDFs contain all Knowledge, then all checkpoints, then every Mastery problem resolved by the publishable revision in the same order.
 - Knowledge and checkpoints preserve authored order.
 - Mastery uses one deterministic shuffled order per exact lesson revision.
 - The student copy has no answer areas, answer key, worked solutions, or internal blueprint/problem metadata. The private teacher copy adds canonical answers and solutions only.

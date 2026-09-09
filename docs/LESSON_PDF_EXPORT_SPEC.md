@@ -24,7 +24,7 @@ The exported document contains exactly these three blocks:
 
 1. all Knowledge content in authored order;
 2. all Knowledge checkpoints in authored order;
-3. all 12 Mastery problems in one deterministic shuffled order.
+3. all Mastery problems resolved by the publishable revision, in one deterministic shuffled order.
 
 Exporting does not ask the teacher to choose a control class or any other class. The PDF belongs to the lesson content revision, not to a class. It is stored in MinIO and becomes visible in the Teacher Class view wherever that exact lesson revision is already present through the normal lesson-to-class relationship.
 
@@ -72,7 +72,7 @@ The action has the following states:
 
 The export action must not open a class picker. It exports the revision currently visible on the Review page.
 
-The existing publish, approval, rejection, regeneration, and complete-pool behavior remains unchanged. PDF export is a separate action and never publishes the lesson.
+PDF export is a separate action and never publishes the lesson. It uses the same canonical content-readiness gate as lesson publishing: the current revision must be teacher-approved and contain at least one safe complete arc. Class selection, deadline, and assignment fields are not PDF conditions because the artifact remains lesson-scoped.
 
 ### 4.2 Teacher Class view
 
@@ -118,9 +118,9 @@ Exclude:
 
 ### 5.3 Mastery
 
-Export is eligible only when the canonical draft resolves exactly 12 distinct Mastery problems from the persisted Mastery blueprint.
+Export is eligible only when the canonical publish-check marks the exact revision publishable. The PDF includes every distinct Mastery problem currently resolved by the persisted blueprint; the ideal pool is 12, but a publishable partial pool is accepted.
 
-Include all 12 problems. Do not select one arc and do not omit problems from incomplete or lower-priority arcs.
+Do not select only the publishable arc. Include every resolved problem from complete and partial arcs, while omitting empty slots.
 
 Before shuffling, construct a stable source list from persisted blueprint problem ownership and stable problem IDs. Do not depend on frontend array order or display-only IDs. Apply a deterministic Fisher-Yates shuffle using:
 
@@ -153,14 +153,15 @@ The request carries `expectedRevision`. NestJS and AI-service must fail closed i
 
 PDF generation is blocked when:
 
+- canonical publish-check rejects the exact revision;
 - Knowledge content is unavailable;
 - the checkpoint collection cannot be normalized safely;
-- fewer or more than 12 distinct Mastery problems resolve from the blueprint;
-- any Mastery slot is missing or ambiguous;
+- no Mastery problem resolves from the blueprint;
+- resolved Mastery IDs are duplicated or ambiguous;
 - a problem marked `Cần thay` is still unresolved in the current Review state;
 - MinIO is unavailable.
 
-The MVP does not introduce an additional approval requirement. The artifact is a snapshot of the requested revision. A later regeneration creates a new lesson revision and therefore requires a new PDF artifact.
+The MVP introduces no approval state beyond the existing publish gate. The artifact is a snapshot of the requested revision. A later regeneration creates a new lesson revision and therefore requires review approval and a new PDF artifact.
 
 A ready artifact is immutable. A new revision never overwrites or mutates the previous revision's artifact. The Class view returns only the artifact whose `content_revision` matches the lesson publication/content item being viewed.
 
@@ -303,7 +304,7 @@ The response must not contain the MinIO object key or an already-expiring URL.
 1. Authenticate the teacher and authorize access to the AI lesson.
 2. Fetch the canonical draft using `expectedRevision`.
 3. Normalize Knowledge and checkpoints at the established boundary.
-4. Resolve all 12 Mastery problems by persisted blueprint ownership.
+4. Run canonical publish-check, then resolve every available Mastery problem by persisted blueprint ownership.
 5. Remove private answers, solutions, internal IDs, policies, and metadata from the render model.
 6. Calculate `source_content_hash` from the sanitized canonical render model.
 7. Reuse the existing READY artifact when revision, render contract, and content hash match.
