@@ -221,6 +221,7 @@ export function DocumentsWorkspace() {
               <div><h2>{document.title}</h2><p>{document.description || document.fileName || "Nguồn bài tập đã phân loại"}</p></div>
               <div className="taxonomy-path"><span>{document.subject}</span><span>{document.topic}</span><span>{document.concept || "Tài liệu chung"}</span></div>
               {document.indexStatus === "needs_manual" && <p className="document-index-help">{documentIndexHelp(document.indexSummary)}</p>}
+              {Boolean(document.indexSummary?.unreadable_objects) && <p className="document-index-help">Có {document.indexSummary?.unreadable_objects} công thức hoặc hình chưa đọc được. Các đoạn chứa nội dung này không được dùng để tạo bài tập.</p>}
               <footer><span>{documentIndexLabel(document.indexStatus)} · {formatDate(document.createdAt)}</span><div>{document.previewUrl && <a className="icon-button" href={document.previewUrl} target="_blank" rel="noreferrer" aria-label="Xem tài liệu"><ArrowSquareOut size={16} /></a>}{(document.indexStatus === "failed" || document.indexStatus === "needs_manual") && <button className="icon-button" disabled={retryIndex.isPending} onClick={() => retryIndex.mutate(document.documentId)} aria-label="Lập chỉ mục lại"><ArrowsClockwise size={16} /></button>}<button className="icon-button" onClick={() => { if (window.confirm("Xóa tài liệu khỏi kho?")) remove.mutate(document.documentId); }} aria-label="Xóa tài liệu"><Trash size={16} /></button></div></footer>
             </article>
           ))}
@@ -244,12 +245,13 @@ function formatDate(value: string) {
 
 function documentIndexLabel(status: string) {
   if (status === "ready") return "Sẵn sàng dùng";
-  if (status === "needs_manual") return "Cần thay tệp nguồn";
+  if (status === "needs_manual") return "Cần kiểm tra tài liệu";
   if (status === "failed") return "Chưa thể lập chỉ mục";
   return "Đang lập chỉ mục";
 }
 
 function documentIndexHelp(summary?: Record<string, number>) {
+  if (summary?.requires_reindex) return "Bộ đọc tài liệu đã được cập nhật. Bấm Lập chỉ mục lại để dùng nguồn này.";
   const total = Number(summary?.total || 0);
   if (total > 0) {
     return `Đã đọc được ${total} mục, nhưng chưa gắn đủ chắc vào kỹ năng. Hãy kiểm tra taxonomy hoặc thử lập chỉ mục lại.`;
