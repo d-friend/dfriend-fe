@@ -2,13 +2,21 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { ArrowRight, LockKey, User } from "@phosphor-icons/react";
 import { apiClient, getApiErrorMessage } from "@/lib/api-client";
+import { studentApi } from "@/lib/student-api";
+import type { AuthUser } from "@/types/contracts";
+
+async function destinationAfterLogin(user: AuthUser) {
+  if (user.role === "ADMIN") return "/admin";
+  if (user.role === "TEACHER") return "/teacher/copilot/new";
+
+  const onboarding = await studentApi.onboarding();
+  return onboarding.completed ? "/student/dashboard" : "/student/onboarding";
+}
 
 export default function LoginPage() {
-  const router = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -19,10 +27,13 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
     try {
-      const response = await apiClient.post<{ user?: { role?: string }; role?: string }>("/auth/login", { username, password });
+      const response = await apiClient.post<AuthUser>("/auth/login", { username, password });
       await apiClient.get("/auth/csrf-token").catch(() => null);
-      const role = response.data.user?.role || response.data.role;
-      router.replace(role === "ADMIN" ? "/admin" : role === "STUDENT" ? "/student/onboarding" : "/teacher/copilot/new");
+      const destination = await destinationAfterLogin(response.data);
+
+      // Authentication changed an HttpOnly cookie. A document navigation makes
+      // every protected server layout validate the newly authenticated role.
+      window.location.replace(destination);
     } catch (loginError) {
       setError(getApiErrorMessage(loginError, "Tên đăng nhập hoặc mật khẩu không đúng."));
     } finally {
