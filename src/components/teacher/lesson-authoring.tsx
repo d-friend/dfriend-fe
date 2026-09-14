@@ -81,6 +81,7 @@ export function LessonAuthoring() {
   const [file, setFile] = useState<File | null>(null);
   const [draftExerciseId, setDraftExerciseId] = useState("");
   const [activeJobId, setActiveJobId] = useState("");
+  const [activeJobIdentity, setActiveJobIdentity] = useState("");
   const [partialGeneration, setPartialGeneration] = useState<LessonGenerationResult | null>(null);
   const [precheckData, setPrecheckData] = useState<Record<string, unknown> | null>(null);
   const [error, setError] = useState("");
@@ -111,7 +112,25 @@ export function LessonAuthoring() {
     selectedSkills.length,
     classIds.length,
   ].filter(Boolean).length;
-  const storageKey = me.data?.id ? `teacher:lesson-draft-form:v2:${me.data.id}` : "";
+  const storageKey = me.data?.id
+    ? `teacher:lesson-draft-form:v2:${me.data.id}${reportId ? `:report:${reportId}` : ""}`
+    : "";
+  const generationIdentity = useMemo(
+    () => JSON.stringify({
+      title: title.trim(),
+      description: description.trim(),
+      lessonGoal: lessonGoal.trim(),
+      subject,
+      topic,
+      concept,
+      taxonomyVersion: taxonomyVersion || null,
+      lessonKind,
+      skillIds: [...selectedSkills].sort(),
+      classIds: [...classIds].sort(),
+      draftExerciseId,
+    }),
+    [classIds, concept, description, draftExerciseId, lessonGoal, lessonKind, selectedSkills, subject, taxonomyVersion, title, topic],
+  );
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -138,7 +157,12 @@ export function LessonAuthoring() {
           setLessonKind(saved.lessonKind === "targeted_review" ? "targeted_review" : "normal");
           setDeadline(saved.deadline ? String(saved.deadline) : defaultDeadline());
           if (saved.draftExerciseId) setDraftExerciseId(String(saved.draftExerciseId));
-          if (saved.activeJobId) setActiveJobId(String(saved.activeJobId));
+          // Legacy autosaves only stored a job id, so they cannot prove that the
+          // job belongs to the currently restored taxonomy/request.
+          if (saved.activeJobId && saved.activeJobIdentity) {
+            setActiveJobId(String(saved.activeJobId));
+            setActiveJobIdentity(String(saved.activeJobIdentity));
+          }
         } else {
           setDeadline(defaultDeadline());
         }
@@ -167,6 +191,8 @@ export function LessonAuthoring() {
       setDescription("");
       setFile(null);
       setDraftExerciseId("");
+      setActiveJobId("");
+      setActiveJobIdentity("");
       setPrecheckData(null);
       setError("");
       setSubject(plannedConcept?.subject || data.subject || "");
@@ -187,17 +213,22 @@ export function LessonAuthoring() {
     if (!storageReady || !storageKey) return;
     window.localStorage.setItem(
       storageKey,
-      JSON.stringify({ title, description, lessonGoal, subject, topic, concept, selectedSkills, lessonKind, classIds, deadline, draftExerciseId, activeJobId }),
+      JSON.stringify({ title, description, lessonGoal, subject, topic, concept, selectedSkills, lessonKind, classIds, deadline, draftExerciseId, activeJobId, activeJobIdentity }),
     );
-  }, [storageReady, storageKey, title, description, lessonGoal, subject, topic, concept, selectedSkills, lessonKind, classIds, deadline, draftExerciseId, activeJobId]);
+  }, [storageReady, storageKey, title, description, lessonGoal, subject, topic, concept, selectedSkills, lessonKind, classIds, deadline, draftExerciseId, activeJobId, activeJobIdentity]);
 
   async function begin(event: FormEvent) {
     event.preventDefault();
     setError("");
-    if (activeJobId) {
+    const resumableJobId = activeJobIdentity === generationIdentity ? activeJobId : "";
+    if (activeJobId && !resumableJobId) {
+      setActiveJobId("");
+      setActiveJobIdentity("");
+    }
+    if (resumableJobId) {
       setPhase("generating");
       try {
-        const lesson1 = await waitForLessonGeneration(activeJobId, setGenerationStep);
+        const lesson1 = await waitForLessonGeneration(resumableJobId, setGenerationStep);
         if (lesson1.generationStatus === "partial_blocked" || lesson1.generationStatus === "partial") {
           setPartialGeneration(lesson1);
           setPhase("goal");
@@ -206,12 +237,16 @@ export function LessonAuthoring() {
         await finishGeneratedLesson(lesson1);
         return;
       } catch (generationError) {
-        if (isApiErrorStatus(generationError, 404)) {
+        if (
+          isApiErrorStatus(generationError, 404) ||
+          (generationError instanceof Error && generationError.name === "LessonGenerationFailed")
+        ) {
           // Completed BullMQ jobs expire, and an old unscoped autosave could belong
-          // to another teacher. Discard it and continue this same submit as new work.
+          // to another request. Terminal jobs are not resumable; continue this
+          // explicitly submitted action as a fresh generation.
           setActiveJobId("");
+          setActiveJobIdentity("");
         } else {
-          if (generationError instanceof Error && generationError.name === "LessonGenerationFailed") setActiveJobId("");
           setError(getApiErrorMessage(generationError, "Chưa thể tiếp tục tiến trình tạo bài."));
           setPhase("goal");
           return;
@@ -270,6 +305,7 @@ export function LessonAuthoring() {
 
   async function generate(allowGenerated: boolean) {
     setPrecheckData(null);
+    setPartialGeneration(null);
     setPhase("generating");
     setError("");
     try {
@@ -291,9 +327,19 @@ export function LessonAuthoring() {
       if (allowGenerated) form1.append("allowGenerated", "true");
       const queued = await teacherApi.generateLesson1(form1);
       if (queued.jobId) {
-        setActiveJobId(String(queued.jobId));
+        const nextJobId = String(queued.jobId);
+        setActiveJobId(nextJobId);
+        setActiveJobIdentity(generationIdentity);
+        // Persist before navigating: the component may unmount before React runs
+        // the autosave effect, but this job must remain recoverable by exact input.
+        if (storageKey) {
+          window.localStorage.setItem(
+            storageKey,
+            JSON.stringify({ title, description, lessonGoal, subject, topic, concept, selectedSkills, lessonKind, classIds, deadline, draftExerciseId, activeJobId: nextJobId, activeJobIdentity: generationIdentity }),
+          );
+        }
         router.push(
-          `/teacher/lessons/generating/${encodeURIComponent(String(queued.jobId))}?origin=wizard`,
+          `/teacher/lessons/generating/${encodeURIComponent(nextJobId)}?origin=wizard`,
         );
         return;
       }
@@ -307,7 +353,10 @@ export function LessonAuthoring() {
       }
       await finishGeneratedLesson(lesson1);
     } catch (generationError) {
-      if (generationError instanceof Error && generationError.name === "LessonGenerationFailed") setActiveJobId("");
+      if (generationError instanceof Error && generationError.name === "LessonGenerationFailed") {
+        setActiveJobId("");
+        setActiveJobIdentity("");
+      }
       setError(getApiErrorMessage(generationError, "Không thể tạo bài học. Bản nháp đã được giữ lại để thử tiếp."));
       setPhase("goal");
     }
@@ -315,12 +364,20 @@ export function LessonAuthoring() {
 
   async function retryMissingSlots() {
     if (!activeJobId) return;
+    if (activeJobIdentity !== generationIdentity) {
+      setActiveJobId("");
+      setActiveJobIdentity("");
+      setPartialGeneration(null);
+      setError("Taxonomy hoặc nội dung bài đã thay đổi. Hãy tạo một tiến trình mới thay vì retry job cũ.");
+      return;
+    }
     setPhase("generating");
     setGenerationStep("Đang tạo tiếp các slot còn thiếu");
     setError("");
     try {
       const queued = await teacherApi.retryMissingLessonSlots(activeJobId);
       setActiveJobId(queued.jobId);
+      setActiveJobIdentity(generationIdentity);
       const result = await waitForLessonGeneration(queued.jobId, setGenerationStep);
       if (result.generationStatus === "partial_blocked" || result.generationStatus === "partial") {
         setPartialGeneration(result);
@@ -338,8 +395,9 @@ export function LessonAuthoring() {
   async function finishGeneratedLesson(lesson1: Record<string, unknown>) {
     const nextDraftId = String(lesson1.draftExerciseId || "");
     const nextLessonId = String(lesson1.lessonId || "");
-    if (!nextLessonId || !nextDraftId) {
-      throw new Error("Backend chưa trả về mã bản nháp để mở trang review.");
+    const resultTaxonomyVersion = Number(lesson1.taxonomyVersion);
+    if (!nextLessonId || !nextDraftId || !Number.isInteger(resultTaxonomyVersion) || resultTaxonomyVersion < 1) {
+      throw new Error("Backend chưa trả đủ lesson ID, bản nháp và taxonomy version để mở review.");
     }
     setDraftExerciseId(nextDraftId);
     setGenerationStep("Đang hoàn thiện bộ bài tập và gắn vào lớp");
@@ -348,8 +406,9 @@ export function LessonAuthoring() {
     form2.append("classIds", JSON.stringify(classIds));
     await teacherApi.generateLesson2(form2);
     setActiveJobId("");
+    setActiveJobIdentity("");
     if (storageKey) window.localStorage.removeItem(storageKey);
-    router.push(`/teacher/lessons/${nextLessonId}/review?taxonomyVersion=${taxonomyVersion}`);
+    router.push(`/teacher/lessons/${nextLessonId}/review?taxonomyVersion=${resultTaxonomyVersion}`);
   }
 
   return (

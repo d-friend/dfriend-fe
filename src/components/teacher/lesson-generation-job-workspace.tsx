@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { LessonGenerationLoading } from "@/components/teacher/lesson-generation-loading";
 import { getApiErrorMessage, teacherApi } from "@/lib/api-client";
 import {
+  replaceStoredLessonGenerationJob,
   waitForLessonGeneration,
   type LessonGenerationResult,
 } from "@/lib/lesson-generation";
@@ -48,12 +49,16 @@ export function LessonGenerationJobWorkspace({ jobId }: { jobId: string }) {
             queryKey: ["teacher", "draft", lessonId, "publish-readiness"],
           }),
         ]);
+        replaceStoredLessonGenerationJob(activeJobId);
         router.replace(
           `/teacher/lessons/${encodeURIComponent(lessonId)}/review?taxonomyVersion=${taxonomyVersion}&generationJobId=${encodeURIComponent(activeJobId)}`,
         );
       })
       .catch((generationError) => {
         if (!cancelled) {
+          if (generationError instanceof Error && generationError.name === "LessonGenerationFailed") {
+            replaceStoredLessonGenerationJob(activeJobId);
+          }
           setError(getApiErrorMessage(generationError, generationError instanceof Error ? generationError.message : "Không thể tạo bài học."));
         }
       });
@@ -68,6 +73,7 @@ export function LessonGenerationJobWorkspace({ jobId }: { jobId: string }) {
     setDetail("Đang tạo đúng các slot còn thiếu");
     try {
       const queued = await teacherApi.retryMissingLessonSlots(activeJobId);
+      replaceStoredLessonGenerationJob(activeJobId, queued.jobId);
       setActiveJobId(queued.jobId);
       router.replace(
         `/teacher/lessons/generating/${encodeURIComponent(queued.jobId)}${search.get("kind") ? `?kind=${encodeURIComponent(search.get("kind") || "")}` : ""}`,
