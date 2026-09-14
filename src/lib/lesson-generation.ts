@@ -11,6 +11,32 @@ export type LessonGenerationResult = Record<string, unknown> & {
   generationCompleteArcIds?: string[];
 };
 
+const LESSON_AUTHORING_STORAGE_PREFIX = "teacher:lesson-draft-form:v2:";
+
+export function replaceStoredLessonGenerationJob(currentJobId: string, nextJobId = "") {
+  if (typeof window === "undefined" || !currentJobId) return;
+  for (let index = 0; index < window.localStorage.length; index += 1) {
+    const key = window.localStorage.key(index);
+    if (!key?.startsWith(LESSON_AUTHORING_STORAGE_PREFIX)) continue;
+    try {
+      const raw = window.localStorage.getItem(key);
+      if (!raw) continue;
+      const saved = JSON.parse(raw) as Record<string, unknown>;
+      if (String(saved.activeJobId || "") !== currentJobId) continue;
+      window.localStorage.setItem(
+        key,
+        JSON.stringify({
+          ...saved,
+          activeJobId: nextJobId,
+          activeJobIdentity: nextJobId ? saved.activeJobIdentity : "",
+        }),
+      );
+    } catch {
+      // A malformed unrelated autosave must not block recovery cleanup.
+    }
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
