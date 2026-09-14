@@ -9,9 +9,13 @@ export type LessonGenerationResult = Record<string, unknown> & {
   generationTotalSlots?: number;
   generationMissingSlotIds?: string[];
   generationCompleteArcIds?: string[];
+  masteryRetryExhausted?: boolean;
+  retryAllowed?: boolean;
 };
 
 const LESSON_AUTHORING_STORAGE_PREFIX = "teacher:lesson-draft-form:v2:";
+const MAX_CONSECUTIVE_TRANSIENT_POLL_FAILURES = 5;
+const TRANSIENT_POLL_STATUSES = [500, 502, 503, 504] as const;
 
 export function replaceStoredLessonGenerationJob(currentJobId: string, nextJobId = "") {
   if (typeof window === "undefined" || !currentJobId) return;
@@ -44,29 +48,75 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export async function waitForLessonGeneration(
   jobId: string,
   onStage: (stage: string) => void,
+  onActiveJobId?: (jobId: string) => void,
 ): Promise<LessonGenerationResult> {
   const timeoutAt = Date.now() + 10 * 60_000;
   const registrationGraceAt = Date.now() + 30_000;
+  let consecutiveTransientFailures = 0;
+  let currentJobId = jobId;
   while (Date.now() < timeoutAt) {
     let job: Record<string, unknown>;
     try {
-      job = await teacherApi.lessonGenerationJob(jobId);
+      job = await teacherApi.lessonGenerationJob(currentJobId);
     } catch (error) {
       if (isApiErrorStatus(error, 404) && Date.now() < registrationGraceAt) {
         onStage("Đang đưa yêu cầu vào hàng đợi");
         await new Promise((resolve) => window.setTimeout(resolve, 500));
         continue;
       }
+      const transient = TRANSIENT_POLL_STATUSES.some((status) =>
+        isApiErrorStatus(error, status),
+      );
+      if (
+        transient &&
+        consecutiveTransientFailures < MAX_CONSECUTIVE_TRANSIENT_POLL_FAILURES
+      ) {
+        consecutiveTransientFailures += 1;
+        onStage("Tạm mất kết nối trạng thái. Bài vẫn đang được xử lý");
+        const retryDelay = Math.min(
+          600 * 2 ** (consecutiveTransientFailures - 1),
+          3_000,
+        );
+        await new Promise((resolve) => window.setTimeout(resolve, retryDelay));
+        continue;
+      }
       throw error;
     }
+    consecutiveTransientFailures = 0;
     const progress = isRecord(job.progress) ? String(job.progress.stage || "") : "";
+    const progressData = isRecord(job.progress) ? job.progress : {};
+    if (progress === "queued") onStage("Yêu cầu đã vào hàng đợi");
     if (progress === "precheck") onStage("Đang kiểm tra kỹ năng và nguồn bài phù hợp");
     if (progress === "knowledge") onStage("Đang soạn Session 1 theo kỹ năng và mục tiêu");
     if (progress === "retrying") onStage("Kết nối bị gián đoạn, đang tiếp tục đúng tiến trình đã lưu");
+    if (progress === "mastery_retrying" || progressData.retryMode === "mastery_missing_only") {
+      if (progressData.retryTrigger === "teacher" && Number(progressData.automaticRetryAttempt || 0) === 0) {
+        onStage("Đang thử tạo lại phần bài tập theo yêu cầu của bạn");
+      } else {
+        const attempt = Number(progressData.automaticRetryAttempt || 1);
+        const limit = Number(progressData.automaticRetryLimit || 2);
+        onStage(`Chưa có arc hoàn chỉnh. D-Friend đang tạo lại phần bài tập — lần ${attempt}/${limit}`);
+      }
+    }
     if (progress === "partial_ready") onStage("Một arc hoàn chỉnh đã sẵn sàng để review");
     if (progress === "partial_blocked" || progress === "partial") onStage("Đã giữ phần đạt chuẩn, chưa có arc hoàn chỉnh");
+    const activeJobId = String(job.activeJobId || progressData.activeJobId || "");
+    if (activeJobId && activeJobId !== currentJobId) {
+      currentJobId = activeJobId;
+      onActiveJobId?.(activeJobId);
+      await new Promise((resolve) => window.setTimeout(resolve, 300));
+      continue;
+    }
     if (["ready", "partial_ready", "partial_blocked", "partial"].includes(String(job.status)) && isRecord(job.result)) return job.result;
     if (job.status === "failed") {
+      const jobErrorData = isRecord(job.error) ? job.error : {};
+      if (jobErrorData.code === "MASTERY_RETRY_EXHAUSTED" && isRecord(job.result)) {
+        return {
+          ...job.result,
+          masteryRetryExhausted: true,
+          retryAllowed: job.result.retryAllowed !== false,
+        };
+      }
       const jobError = isRecord(job.error) ? job.error.message : job.error;
       const error = new Error(String(jobError || "Không thể tạo bài học."));
       error.name = "LessonGenerationFailed";
