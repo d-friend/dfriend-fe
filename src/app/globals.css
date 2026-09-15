@@ -3256,20 +3256,6 @@ button:disabled {
   border-radius: 0.85rem;
 }
 
-.teacher-setup-mark {
-  display: grid;
-  width: 4.5rem;
-  height: 4.5rem;
-  place-items: center;
-  border: 1px solid rgb(255 255 255 / 0.16);
-  border-radius: 0.85rem;
-  background: rgb(255 255 255 / 0.08);
-  color: #f7f4ef;
-  font-family: var(--font-display);
-  font-size: 0.82rem;
-  font-weight: 740;
-}
-
 .teacher-setup-page .admin-success {
   display: flex;
   align-items: center;

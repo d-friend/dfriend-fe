@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
@@ -42,7 +43,7 @@ export function TeacherSetupPasswordForm({ token }: { token: string }) {
   return (
     <main className="login-page teacher-setup-page">
       <section className="login-brand">
-        <div className="teacher-setup-mark">D-Friend</div>
+        <Image src="/dfriend-logo.png" alt="Logo D-Friend" width={96} height={96} priority />
         <div>
           <p className="workspace-kicker">Teacher onboarding</p>
           <h1>Kích hoạt tài khoản giáo viên</h1>
