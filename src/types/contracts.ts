@@ -268,6 +268,39 @@ export interface TeacherSubmission {
   content?: unknown;
   submitted_at?: string;
   submittedAt?: string;
+  evidence_session_id?: string;
+  evidence_completion_status?: "completed" | "expired_partial";
+  problems?: TeacherProblemEvidence[];
+}
+
+export interface TeacherProblemEvidence {
+  problem_id: number;
+  bank_problem_id: string;
+  question: string;
+  role: "reinforcement" | "challenge" | "exploration" | "extension";
+  primary_skill_id: string;
+  solved: boolean;
+  score: number;
+  attempts: number;
+  terminal_resolution?: string | null;
+  reasoning_resolution?: string | null;
+  submissions: Array<{
+    correlation_id?: string | null;
+    submitted_at?: string | null;
+    content: string;
+    answer_verdict: string;
+    approach_quality: string;
+    reasoning_evidence_verdict: string;
+    consumed_attempt: boolean;
+    attempt_kind?: string | null;
+    missing_evidence_code?: string | null;
+  }>;
+  reasoning: Array<{
+    correlation_id: string;
+    created_at?: string | null;
+    content: string;
+    approach_id?: number | null;
+  }>;
 }
 
 export interface ActivityEvent {
@@ -619,6 +652,7 @@ export interface StudySession {
   session_completed?: boolean;
   completed_problem_count?: number;
   total_problem_count?: number;
+  awaiting_reasoning?: boolean;
   subject?: string;
   topic?: string;
   concept?: string;
@@ -692,7 +726,7 @@ export interface StudentReport {
   lessonId: string;
   lessonTitle?: string | null;
   lessonKind?: "main" | "remedial" | "advanced";
-  score?: number;
+  score?: number | null;
   sessionProgress?: number | null;
   status?: string;
   sessionSummary?: StudySessionSummary | null;

@@ -21,13 +21,15 @@ export type StudyStreamEvent =
       approach_confidence?: number | null;
       needs_clarification?: boolean;
       advanced?: boolean;
-      terminal_resolution?: "MASTERED" | "ANSWER_ACCEPTED" | "UNRESOLVED_AFTER_REPAIR" | "INCORRECT_TERMINAL" | null;
+      terminal_resolution?: "MASTERED" | "ANSWER_ACCEPTED" | "UNRESOLVED_AFTER_REPAIR" | "INCORRECT_TERMINAL" | "SKIPPED" | null;
       state_updated?: boolean;
       session_completed?: boolean;
       completed_problem_count?: number;
       total_problem_count?: number;
     }
   | { type: "error"; message?: string };
+
+export type StudyTurnCommand = "CHAT" | "SUBMIT_ANSWER" | "SUBMIT_REASONING" | "SKIP_PROBLEM";
 
 function readCookie(name: string) {
   if (typeof document === "undefined") return null;
@@ -44,6 +46,8 @@ export async function streamStudyBuddy(
     message: string;
     is_submission: boolean;
     problem_id: number;
+    command: StudyTurnCommand;
+    command_id: string;
   },
   onEvent: (event: StudyStreamEvent) => void,
   signal: AbortSignal,
@@ -67,9 +71,12 @@ export async function streamStudyBuddy(
   }
 
   let terminal = false;
+  let terminalError = "";
   await consumeJsonSse<StudyStreamEvent>(response, (event) => {
     if (event.type === "done" || event.type === "error") terminal = true;
+    if (event.type === "error") terminalError = event.message || "Study Buddy chưa thể lưu lượt này.";
     onEvent(event);
   });
+  if (terminalError) throw new Error(terminalError);
   if (!terminal) throw new Error("Kết nối Study Buddy kết thúc trước khi lưu tiến độ.");
 }
