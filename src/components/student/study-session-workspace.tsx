@@ -18,18 +18,21 @@ import {
   WarningCircle,
 } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type RefObject } from "react";
 import { getApiErrorMessage } from "@/lib/api-client";
 import { MathContent } from "@/components/shared/math-content";
 import { studentApi, studentKeys } from "@/lib/student-api";
-import { streamStudyBuddy, type StudyStreamEvent } from "@/lib/student-stream";
+import { streamStudyBuddy, type StudyStreamEvent, type StudyTurnCommand } from "@/lib/student-stream";
 import { deriveStudyProgress } from "@/lib/study-progress";
 import { buildMasteryGreeting, companionPolicy } from "@/lib/student-companion";
 import type { StudyProblem, StudySession } from "@/types/contracts";
+import { studentMathPreview } from "@/lib/math-markdown";
 
 type ChatMessage = { id: string; role: "student" | "buddy"; content: string; degraded?: boolean };
 type SessionUiState = "initialising" | "idle" | "streaming" | "awaiting_reasoning" | "clarifying" | "farming" | "degraded" | "closing";
 type StudyChoice = { label: string; content: string };
+type PendingTurn = { commandId: string; content: string; command: StudyTurnCommand; problemId: number; buddyId: string };
+type StoredStudyState = { messages?: ChatMessage[]; message?: string; answer?: string; scratchpads?: Record<number, string>; pendingTurn?: PendingTurn | null };
 
 const ROLE_LABELS: Record<string, string> = {
   reinforcement: "The Warm-Up · Chứng minh điều vừa học",
@@ -52,9 +55,12 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
   const [scratchpads, setScratchpads] = useState<Record<number, string>>({});
   const [mobileTab, setMobileTab] = useState<"problem" | "buddy">("problem");
   const [activeProblemId, setActiveProblemId] = useState<number | null>(null);
+  const [pendingTurn, setPendingTurn] = useState<PendingTurn | null>(null);
   const streamController = useRef<AbortController | null>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const buddyMessageRef = useRef<HTMLTextAreaElement>(null);
+  const scratchpadRef = useRef<HTMLTextAreaElement>(null);
+  const answerInputRef = useRef<HTMLInputElement>(null);
 
   const initialise = useCallback(async () => {
     setUiState("initialising");
@@ -72,10 +78,17 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
       const active = await studentApi.activeSession(lessonId, taxonomyVersion);
       const value = active.status === "not_found" ? await studentApi.startSession(lessonId, taxonomyVersion) : active;
       if (!value.session_id || !value.problems?.length) throw new Error("Session 2 chưa có bài tập để bắt đầu.");
+      const restored = readStoredStudyState(value.session_id);
+      const pendingCandidate = restored?.pendingTurn ?? null;
+      const validPending = pendingCandidate?.problemId === value.current_problem_id ? pendingCandidate : null;
       setSession(value);
-      setMessages([{ id: "welcome", role: "buddy", content: buildMasteryGreeting(value.response_adaptation_policy) }]);
+      setMessages(restored?.messages?.length ? restored.messages : [{ id: "welcome", role: "buddy", content: buildMasteryGreeting(value.response_adaptation_policy) }]);
+      setMessage(restored?.message || "");
+      setAnswer(restored?.answer || "");
+      setScratchpads(restored?.scratchpads || {});
+      setPendingTurn(validPending);
       setActiveProblemId(value.current_problem_id || value.problems[0].problem_id);
-      setUiState("idle");
+      setUiState(validPending ? "degraded" : value.awaiting_reasoning ? "awaiting_reasoning" : "idle");
     } catch (error) {
       setSessionError(getApiErrorMessage(error, error instanceof Error ? error.message : "Không thể khởi tạo Session 2."));
       setUiState("initialising");
@@ -83,6 +96,13 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
   }, [lessonId]);
 
   useEffect(() => { void initialise(); return () => streamController.current?.abort(); }, [initialise]);
+  useEffect(() => {
+    if (!session?.session_id) return;
+    sessionStorage.setItem(
+      `dfriend:study-session:${session.session_id}`,
+      JSON.stringify({ messages, message, answer, scratchpads, pendingTurn }),
+    );
+  }, [answer, message, messages, pendingTurn, scratchpads, session?.session_id]);
   useEffect(() => { transcriptRef.current?.scrollTo({ top: transcriptRef.current.scrollHeight, behavior: "smooth" }); }, [messages]);
   useEffect(() => {
     const input = buddyMessageRef.current;
@@ -106,21 +126,39 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
   const currentRoleLabel = currentProblem?.recommended_problem_role
     ? ROLE_LABELS[currentProblem.recommended_problem_role] || "Bài luyện tập"
     : "Bài luyện tập";
+  const isViewingCurrentProblem = currentProblem?.problem_id === session?.current_problem_id;
 
-  async function sendTurn(content: string, isSubmission: boolean) {
-    if (!session?.session_id || !currentProblem || uiState === "streaming" || !content.trim()) return;
-    const studentMessage: ChatMessage = { id: `student-${Date.now()}`, role: "student", content: content.trim() };
-    const buddyId = `buddy-${Date.now()}`;
-    setMessages((current) => [...current, studentMessage, { id: buddyId, role: "buddy", content: "" }]);
+  async function sendTurn(content: string, command: StudyTurnCommand, retryTurn?: PendingTurn) {
+    if (!session?.session_id || !currentProblem || !isViewingCurrentProblem || uiState === "streaming" || !content.trim()) return;
+    const turn: PendingTurn = retryTurn || {
+      commandId: globalThis.crypto?.randomUUID?.() || `turn-${Date.now()}`,
+      content: content.trim(),
+      command,
+      problemId: currentProblem.problem_id,
+      buddyId: `buddy-${Date.now()}`,
+    };
+    if (turn.problemId !== session.current_problem_id) {
+      setPendingTurn(null);
+      setSessionError("Lượt gửi cũ thuộc bài trước nên không thể gửi lại.");
+      return;
+    }
+    if (retryTurn) {
+      setMessages((current) => current.map((item) => item.id === turn.buddyId ? { ...item, content: "", degraded: false } : item));
+    } else {
+      const studentMessage: ChatMessage = { id: `student-${Date.now()}`, role: "student", content: turn.content };
+      setMessages((current) => [...current, studentMessage, { id: turn.buddyId, role: "buddy", content: "" }]);
+    }
+    setPendingTurn(turn);
     setUiState("streaming");
     setMobileTab("buddy");
     const controller = new AbortController();
     streamController.current = controller;
     try {
-      await streamStudyBuddy({ session_id: session.session_id, message: content.trim(), is_submission: isSubmission, problem_id: currentProblem.problem_id }, (event) => handleStreamEvent(event, buddyId), controller.signal);
+      await streamStudyBuddy({ session_id: session.session_id, message: turn.content, is_submission: turn.command === "SUBMIT_ANSWER", problem_id: turn.problemId, command: turn.command, command_id: turn.commandId }, (event) => handleStreamEvent(event, turn.buddyId), controller.signal);
+      setPendingTurn(null);
     } catch (error) {
       if (controller.signal.aborted) return;
-      setMessages((current) => current.map((item) => item.id === buddyId ? { ...item, content: item.content || (error instanceof Error ? error.message : "Kết nối bị gián đoạn. Bạn có thể thử gửi lại."), degraded: true } : item));
+      setMessages((current) => current.map((item) => item.id === turn.buddyId ? { ...item, content: item.content || (error instanceof Error ? error.message : "Kết nối bị gián đoạn. Bạn có thể thử gửi lại."), degraded: true } : item));
       setUiState("degraded");
     } finally {
       streamController.current = null;
@@ -145,6 +183,7 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
       session_completed: event.session_completed ?? current.session_completed,
       completed_problem_count: event.completed_problem_count ?? current.completed_problem_count,
       total_problem_count: event.total_problem_count ?? current.total_problem_count,
+      awaiting_reasoning: event.awaiting_reasoning ?? false,
     } : current);
     if (event.current_problem_id) setActiveProblemId(event.current_problem_id);
     if (event.advanced || event.session_completed) setUiState("idle");
@@ -154,15 +193,25 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
     else setUiState("idle");
   }
 
-  const canSendChat = Boolean(message.trim()) && uiState !== "streaming" && uiState !== "closing";
+  const canSendChat = Boolean(message.trim()) && isViewingCurrentProblem && uiState !== "streaming" && uiState !== "closing";
+  const canSubmitReasoning = canSendChat && uiState === "awaiting_reasoning";
+  const canSubmitScratchpad = Boolean(currentProblem && scratchpads[currentProblem.problem_id]?.trim()) && isViewingCurrentProblem && uiState === "awaiting_reasoning";
 
-  function submitChat(event?: FormEvent) { event?.preventDefault(); if (!canSendChat) return; const value = message; setMessage(""); void sendTurn(value, false); }
+  function submitChat(event?: FormEvent) { event?.preventDefault(); if (!canSendChat) return; const value = message; setMessage(""); void sendTurn(value, "CHAT"); }
+  function submitReasoning() { if (!canSubmitReasoning) return; const value = message; setMessage(""); void sendTurn(value, "SUBMIT_REASONING"); }
+  function submitScratchpadReasoning() { const value = currentProblem ? scratchpads[currentProblem.problem_id] : ""; if (!value?.trim() || !canSubmitScratchpad) return; void sendTurn(value, "SUBMIT_REASONING"); }
+  function retryPending() { if (!pendingTurn || pendingTurn.problemId !== session?.current_problem_id) return; void sendTurn(pendingTurn.content, pendingTurn.command, pendingTurn); }
+  function skipProblem() {
+    if (!isViewingCurrentProblem || allComplete || uiState === "streaming") return;
+    const confirmed = window.confirm("Bỏ qua bài này? Bài sẽ được ghi là chưa hoàn thành và không tính là đã nắm vững.");
+    if (confirmed) void sendTurn("Em chọn bỏ qua bài này.", "SKIP_PROBLEM");
+  }
   function handleChatKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key !== "Enter" || event.shiftKey) return;
     event.preventDefault();
     submitChat();
   }
-  function submitAnswer(event: FormEvent) { event.preventDefault(); const value = answer; setAnswer(""); void sendTurn(value, true); }
+  function submitAnswer(event: FormEvent) { event.preventDefault(); if (!isViewingCurrentProblem) return; const value = answer; setAnswer(""); void sendTurn(value, "SUBMIT_ANSWER"); }
 
   async function closeSession(finishEarly = false) {
     if (!session?.session_id) return;
@@ -179,6 +228,7 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
       }
       const summary = await studentApi.closeSession(session.session_id, lessonId, sessionTaxonomyVersion, { finishEarly });
       if (summary.status === "error") throw new Error(summary.message || "Chưa thể kết thúc phiên học.");
+      sessionStorage.removeItem(`dfriend:study-session:${session.session_id}`);
       sessionStorage.setItem(`dfriend:feedback:${lessonId}`, JSON.stringify(summary));
       await queryClient.invalidateQueries({ queryKey: studentKeys.metrics });
       await queryClient.invalidateQueries({ queryKey: studentKeys.classes });
@@ -215,6 +265,14 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
                 </header>
                 <div className="study-problem-statement">
                   <MathContent>{displayedQuestion.stem}</MathContent>
+                  {currentProblem.attachment_url ? (
+                    <a className="study-problem-image" href={currentProblem.attachment_url} target="_blank" rel="noreferrer">
+                      {/* Keep private/presigned problem images out of an image optimization proxy. */}
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={currentProblem.attachment_url} alt="Hình minh họa của đề bài" />
+                      <span>Chạm để mở hình lớn</span>
+                    </a>
+                  ) : null}
                   {displayedQuestion.choices.length ? (
                     <ol className="study-problem-choices" type="A">
                       {displayedQuestion.choices.map((choice) => (
@@ -227,20 +285,84 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
                   ) : null}
                 </div>
               </article>
-              <div className="scratchpad"><label htmlFor="scratchpad"><PencilSimpleLine size={18} /> Nháp của bạn</label><textarea id="scratchpad" value={scratchpads[currentProblem.problem_id] || ""} onChange={(event) => setScratchpads((current) => ({ ...current, [currentProblem.problem_id]: event.target.value }))} placeholder="Ghi các bước, thử phép tính hoặc viết điều bạn đang nghĩ..." /></div>
+              <div className="scratchpad"><label htmlFor="scratchpad"><PencilSimpleLine size={18} /> Nháp của bạn</label><textarea ref={scratchpadRef} id="scratchpad" value={scratchpads[currentProblem.problem_id] || ""} onChange={(event) => setScratchpads((current) => ({ ...current, [currentProblem.problem_id]: event.target.value }))} placeholder="Ghi các bước, thử phép tính hoặc viết điều bạn đang nghĩ..." /><MathInputAssist inputRef={scratchpadRef} value={scratchpads[currentProblem.problem_id] || ""} onChange={(value) => setScratchpads((current) => ({ ...current, [currentProblem.problem_id]: value }))} />{uiState === "awaiting_reasoning" && isViewingCurrentProblem ? <button type="button" className="scratchpad-submit" onClick={submitScratchpadReasoning} disabled={!canSubmitScratchpad}>Nộp phần nháp này làm giải thích</button> : null}</div>
             </div>
-            <form className="answer-composer" onSubmit={submitAnswer}><label htmlFor="problem-answer"><strong>Đáp án cuối cùng</strong><span>{answerChoices.length ? "Chọn một phương án bên dưới." : "Nhập bằng bàn phím: 5x^2 · 3/4 · x=2 · sqrt(2)"}</span></label>{answerChoices.length ? <div className="answer-choice-shortcuts" role="group" aria-label="Chọn đáp án">{answerChoices.map((choice) => <button key={choice} type="button" data-selected={answer === choice} onClick={() => setAnswer(choice)} disabled={uiState === "streaming" || allComplete}>{choice}</button>)}</div> : null}<div><input id="problem-answer" value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder={answerChoices.length ? "Hoặc nhập A, B, C, D" : "Ví dụ: 5x^2 hoặc 3/4"} autoCapitalize="characters" spellCheck={false} disabled={uiState === "streaming" || allComplete} /><button className="student-primary-button" disabled={!answer.trim() || uiState === "streaming" || allComplete}>Kiểm tra <ArrowRight size={16} /></button></div></form>
+            <form className="answer-composer" onSubmit={submitAnswer}>{!isViewingCurrentProblem ? <div className="study-readonly-notice"><span>Bạn đang xem lại bài cũ.</span><button type="button" onClick={() => setActiveProblemId(session.current_problem_id ?? problems[0]?.problem_id)}>Quay lại bài đang làm</button></div> : null}<label htmlFor="problem-answer"><strong>Đáp án cuối cùng</strong><span>{answerChoices.length ? "Chọn một phương án bên dưới." : "Nhập bằng bàn phím hoặc dùng phím toán nhanh."}</span></label>{answerChoices.length ? <div className="answer-choice-shortcuts" role="group" aria-label="Chọn đáp án">{answerChoices.map((choice) => <button key={choice} type="button" data-selected={answer === choice} onClick={() => setAnswer(choice)} disabled={!isViewingCurrentProblem || uiState === "streaming" || allComplete}>{choice}</button>)}</div> : <MathInputAssist inputRef={answerInputRef} value={answer} onChange={setAnswer} compact />}<div><input ref={answerInputRef} id="problem-answer" value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder={answerChoices.length ? "Hoặc nhập A, B, C, D" : "Ví dụ: 5x^2 hoặc 3/4"} autoCapitalize="characters" spellCheck={false} disabled={!isViewingCurrentProblem || uiState === "streaming" || allComplete} /><button className="student-primary-button" disabled={!isViewingCurrentProblem || !answer.trim() || uiState === "streaming" || allComplete}>Kiểm tra <ArrowRight size={16} /></button></div>{isViewingCurrentProblem && !allComplete ? <button type="button" className="study-skip-problem" onClick={skipProblem} disabled={uiState === "streaming" || uiState === "closing"}>Bỏ qua bài này</button> : null}</form>
           </section>
 
           <section className="buddy-pane" data-mobile-active={mobileTab === "buddy"}>
             <div className="buddy-title"><div><span className="buddy-mark"><Sparkle size={18} weight="fill" /></span><div><strong>{activeCompanion.companion_name}</strong><small>Bạn học AI · Gợi mở, không làm hộ</small></div></div>{uiState === "streaming" && <span className="buddy-typing">Đang đọc cách bạn nghĩ</span>}</div>
-            <div className="buddy-transcript" ref={transcriptRef}>{messages.map((item) => <article key={item.id} data-role={item.role} data-degraded={item.degraded}><span>{item.role === "buddy" ? activeCompanion.companion_name : "Bạn"}</span>{item.content ? <MathContent>{item.content}</MathContent> : <div className="markdown-body"><TypingPlaceholder /></div>}</article>)}{uiState === "awaiting_reasoning" && <StateNotice type="reasoning" />}{uiState === "clarifying" && <StateNotice type="clarifying" />}{uiState === "farming" && <StateNotice type="farming" />}{uiState === "degraded" && <StateNotice type="degraded" />}{allComplete && <div className="summit-card"><Flag size={25} weight="fill" /><div><strong>Bạn đã tới đỉnh của phiên học</strong><span>Kết thúc để nhận phản hồi về điểm mạnh và phần nên luyện tiếp.</span></div><button className="student-primary-button" onClick={() => void closeSession()} disabled={uiState === "closing"}>{uiState === "closing" ? "Đang tổng hợp" : "Nhận feedback"}</button></div>}{sessionError && session && <div className="student-form-error" role="alert">{sessionError} <button onClick={() => void closeSession(lastCloseWasEarly)}>Thử lại</button></div>}</div>
-            <form className="buddy-composer" onSubmit={submitChat}><label htmlFor="buddy-message">Trao đổi cách làm</label><div><textarea ref={buddyMessageRef} id="buddy-message" rows={1} value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={handleChatKeyDown} placeholder="Mình đang nghĩ là..." disabled={uiState === "streaming" || uiState === "closing"} /><button aria-label="Gửi tin nhắn" disabled={!canSendChat}><PaperPlaneTilt size={19} weight="fill" /></button></div></form>
+            <div className="buddy-transcript" ref={transcriptRef}>{messages.map((item) => <article key={item.id} data-role={item.role} data-degraded={item.degraded}><span>{item.role === "buddy" ? activeCompanion.companion_name : "Bạn"}</span>{item.content ? <MathContent>{item.content}</MathContent> : <div className="markdown-body"><TypingPlaceholder /></div>}</article>)}{uiState === "awaiting_reasoning" && <StateNotice type="reasoning" />}{uiState === "clarifying" && <StateNotice type="clarifying" />}{uiState === "farming" && <StateNotice type="farming" />}{uiState === "degraded" && <StateNotice type="degraded" />}{pendingTurn && uiState === "degraded" ? <button type="button" className="student-secondary-button study-retry-turn" onClick={retryPending}>Gửi lại lượt vừa rồi</button> : null}{allComplete && <div className="summit-card"><Flag size={25} weight="fill" /><div><strong>Bạn đã tới đỉnh của phiên học</strong><span>Kết thúc để nhận phản hồi về điểm mạnh và phần nên luyện tiếp.</span></div><button className="student-primary-button" onClick={() => void closeSession()} disabled={uiState === "closing"}>{uiState === "closing" ? "Đang tổng hợp" : "Nhận feedback"}</button></div>}{sessionError && session && <div className="student-form-error" role="alert">{sessionError} <button onClick={() => void closeSession(lastCloseWasEarly)}>Thử lại</button></div>}</div>
+            <form className="buddy-composer" onSubmit={submitChat}><label htmlFor="buddy-message">{uiState === "awaiting_reasoning" ? "Viết cách bạn làm, rồi nộp giải thích" : "Trao đổi cách làm"}</label><MathInputAssist inputRef={buddyMessageRef} value={message} onChange={setMessage} compact /><div><textarea ref={buddyMessageRef} id="buddy-message" rows={1} value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={handleChatKeyDown} placeholder={uiState === "awaiting_reasoning" ? "Ví dụ: Mình chuyển vế rồi chia cả hai vế cho..." : "Mình đang nghĩ là..."} disabled={!isViewingCurrentProblem || uiState === "streaming" || uiState === "closing"} />{uiState === "awaiting_reasoning" ? <button type="button" className="buddy-reasoning-submit" onClick={submitReasoning} disabled={!canSubmitReasoning}>Nộp giải thích</button> : null}<button aria-label="Gửi tin nhắn" title="Gửi như tin nhắn" disabled={!canSendChat}><PaperPlaneTilt size={19} weight="fill" /></button></div></form>
           </section>
         </div>
       ) : null}
     </div>
   );
+}
+
+const MATH_KEYS = [
+  { label: "a/b", insert: "()/()", cursorBack: 4 },
+  { label: "√", insert: "sqrt()", cursorBack: 1 },
+  { label: "x²", insert: "^2", cursorBack: 0 },
+  { label: "≤", insert: " ≤ ", cursorBack: 0 },
+  { label: "≥", insert: " ≥ ", cursorBack: 0 },
+  { label: "∈", insert: " ∈ ", cursorBack: 0 },
+  { label: "∪", insert: " ∪ ", cursorBack: 0 },
+  { label: "∩", insert: " ∩ ", cursorBack: 0 },
+  { label: "→", insert: " → ", cursorBack: 0 },
+  { label: "vectơ", insert: "\\vec{AB}", cursorBack: 3 },
+] as const;
+
+function MathInputAssist({ inputRef, value, onChange, compact = false }: {
+  inputRef: RefObject<HTMLInputElement | HTMLTextAreaElement | null>;
+  value: string;
+  onChange: (value: string) => void;
+  compact?: boolean;
+}) {
+  function insertMathToken(token: (typeof MATH_KEYS)[number]) {
+    const input = inputRef.current;
+    const start = input?.selectionStart ?? value.length;
+    const end = input?.selectionEnd ?? start;
+    const selected = value.slice(start, end);
+    const insertion = selected
+      ? token.label === "√"
+        ? `sqrt(${selected})`
+        : token.label === "vectơ"
+          ? `\\vec{${selected}}`
+          : token.label === "a/b"
+            ? `(${selected})/()`
+            : `${selected}${token.insert}`
+      : token.insert;
+    const next = `${value.slice(0, start)}${insertion}${value.slice(end)}`;
+    onChange(next);
+    const cursor = start + insertion.length - (selected ? 0 : token.cursorBack);
+    requestAnimationFrame(() => {
+      input?.focus();
+      input?.setSelectionRange(cursor, cursor);
+    });
+  }
+
+  return (
+    <div className="math-input-assist" data-compact={compact}>
+      <div className="math-input-keys" role="toolbar" aria-label="Phím toán nhanh">
+        {MATH_KEYS.map((token) => (
+          <button key={token.label} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => insertMathToken(token)}>{token.label}</button>
+        ))}
+      </div>
+      {value.trim() ? <div className="math-input-preview"><span>Xem trước</span><MathContent>{studentMathPreview(value)}</MathContent></div> : null}
+    </div>
+  );
+}
+
+function readStoredStudyState(sessionId: string): StoredStudyState | null {
+  try {
+    const stored = sessionStorage.getItem(`dfriend:study-session:${sessionId}`);
+    return stored ? JSON.parse(stored) as StoredStudyState : null;
+  } catch {
+    sessionStorage.removeItem(`dfriend:study-session:${sessionId}`);
+    return null;
+  }
 }
 
 function MountainProgress({ problems, completedCount, currentProblemId, waiting }: { problems: StudyProblem[]; completedCount: number; currentProblemId: number | null; waiting: boolean }) {

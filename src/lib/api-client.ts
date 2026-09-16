@@ -200,7 +200,13 @@ export const adminApi = {
 };
 
 export const authApi = {
-  setupTeacherPassword: async (payload: { token: string; password: string }) =>
+  teacherPasswordSetupPreview: async (token: string) =>
+    (
+      await apiClient.get<{ username: string }>("/auth/teacher-password-setup", {
+        params: { token },
+      })
+    ).data,
+  setupTeacherPassword: async (payload: { token: string; username: string; password: string }) =>
     (await apiClient.post<AuthUser>("/auth/teacher-password-setup", payload)).data,
 };
 

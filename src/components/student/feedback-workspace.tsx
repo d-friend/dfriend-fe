@@ -51,9 +51,9 @@ export function FeedbackWorkspace({ lessonId }: { lessonId: string }) {
     expectedCount,
     Math.max(finishedCount, progressCompletedCount),
   );
-  const average = typeof masteryReport?.score === "number" ? masteryReport.score : normalizeScore(reportQuery.data?.score ?? 0);
-  const scoreTone = average >= 8 ? "strong" : average >= 6 ? "steady" : "focus";
-  const scoreCopy = scoreTone === "strong" ? "Nắm khá chắc" : scoreTone === "steady" ? "Đang lên nhịp" : "Cần củng cố";
+  const average = typeof masteryReport?.score === "number" ? masteryReport.score : typeof reportQuery.data?.score === "number" ? normalizeScore(reportQuery.data.score) : null;
+  const scoreTone = average === null ? "unknown" : average >= 8 ? "strong" : average >= 6 ? "steady" : "focus";
+  const scoreCopy = average === null ? "Chưa đủ dữ liệu" : scoreTone === "strong" ? "Nắm khá chắc" : scoreTone === "steady" ? "Đang lên nhịp" : "Cần củng cố";
   const lessonTitle = reportQuery.data?.lessonTitle || "Bài học vừa hoàn thành";
   const hasExtra = !followUp && Boolean(extrasQuery.data?.extra_exercises?.some((group) => (group.problem_count || group.exercises.length) > 0));
   const nextFollowUpId = extrasQuery.data?.extra_exercises?.find((group) => (group.problem_count || group.exercises.length) > 0)?.publication_id;
@@ -69,8 +69,8 @@ export function FeedbackWorkspace({ lessonId }: { lessonId: string }) {
       <motion.section className="feedback-hero" initial={reduceMotion ? false : { opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.38 }} aria-labelledby="feedback-title">
         <div className="feedback-score-card" data-tone={scoreTone}>
           <span>Điểm phiên học</span>
-          <strong>{formatScore(average)}</strong>
-          <small>/10</small>
+          <strong>{average === null ? "—" : formatScore(average)}</strong>
+          {average === null ? null : <small>/10</small>}
           <b>{scoreCopy}</b>
         </div>
         <div className="feedback-hero-copy">

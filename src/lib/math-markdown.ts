@@ -34,6 +34,28 @@ export function normalizeMathAnswer(value: string | null | undefined) {
   return `$$\n${normalized}\n$$`;
 }
 
+/** Render the shorthand students can type on a phone without changing submitted text. */
+export function studentMathPreview(value: string | null | undefined) {
+  if (!value?.trim()) return "";
+  return value
+    .split("\n")
+    .map((line) => {
+      if (!line.trim() || hasMathDelimiter(line) || hasNaturalLanguage(line)) return line;
+      const math = line
+        .replace(/<=|≤/g, "\\leq ")
+        .replace(/>=|≥/g, "\\geq ")
+        .replace(/!=|≠/g, "\\neq ")
+        .replace(/∈/g, "\\in ")
+        .replace(/∪/g, "\\cup ")
+        .replace(/∩/g, "\\cap ")
+        .replace(/→/g, "\\to ")
+        .replace(/sqrt\(([^()]+)\)/g, "\\sqrt{$1}")
+        .replace(/(^|[\s=(])(-?[A-Za-z0-9]+)\/(-?[A-Za-z0-9]+)(?=$|[\s),;+\-])/g, "$1\\frac{$2}{$3}");
+      return `$${math.trim()}$`;
+    })
+    .join("\n");
+}
+
 function hasMathDelimiter(value: string) {
   return /(^|[^\\])\$/.test(value);
 }

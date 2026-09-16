@@ -29,7 +29,7 @@ import { useEffect, useMemo, useState, type CSSProperties, type FormEvent, type 
 import { MathContent } from "@/components/shared/math-content";
 import { getApiErrorMessage, teacherApi } from "@/lib/api-client";
 import { skillDisplayName, skillLabelMap } from "@/lib/skill-labels";
-import type { ClassTab, CopilotReportDetail, CopilotReportSummary, TeacherReportAction, TeacherReportApplication, TeacherReportEffect, TeacherRoadmapItem, TeacherSubmission } from "@/types/contracts";
+import type { ClassTab, CopilotReportDetail, CopilotReportSummary, TeacherProblemEvidence, TeacherReportAction, TeacherReportApplication, TeacherReportEffect, TeacherRoadmapItem, TeacherSubmission } from "@/types/contracts";
 
 type ClassLessonItem = TeacherRoadmapItem & {
   lessonKind?: "main" | "remedial" | "advanced";
@@ -416,7 +416,26 @@ function SubmissionEditor({ item, onGrade, saving }: { item: TeacherSubmission; 
   const [score, setScore] = useState(String(item.grade ?? ""));
   const [feedback, setFeedback] = useState(item.feedback || "");
   const id = item.submission_id || item.id || "";
-  return <article className="submission-card"><button className="submission-summary" onClick={() => setExpanded((value) => !value)}><span><strong>{item.lessonTitle || "Bài nộp"}</strong><small>{formatDate(item.submitted_at || item.submittedAt)} / {item.status || "Đã nộp"}</small></span><b>{item.grade == null ? "Chưa chấm" : `${item.grade}/10`}</b></button>{expanded && <div className="submission-editor"><div className="submission-content"><span>Nội dung nộp</span><pre>{renderContent(item.content)}</pre></div><div className="grading-grid"><div className="form-field"><label htmlFor={`score-${id}`}>Điểm 0-10</label><input id={`score-${id}`} className="input" type="number" min="0" max="10" step="0.1" value={score} onChange={(event) => setScore(event.target.value)} /></div><div className="form-field"><label htmlFor={`feedback-${id}`}>Feedback</label><textarea id={`feedback-${id}`} className="textarea !min-h-20" value={feedback} onChange={(event) => setFeedback(event.target.value)} /></div></div><button className="primary-button" disabled={saving || !id || Number(score) < 0 || Number(score) > 10} onClick={() => onGrade(id, Number(score), feedback)}>Lưu đánh giá</button></div>}</article>;
+  const problems = item.problems || [];
+  return <article className="submission-card"><button className="submission-summary" onClick={() => setExpanded((value) => !value)}><span><strong>{item.lessonTitle || "Bài nộp"}</strong><small>{formatDate(item.submitted_at || item.submittedAt)} / {item.evidence_completion_status === "expired_partial" ? "Kết thúc sớm" : item.status || "Đã nộp"}</small></span><b>{problems.length ? `${problems.length} bài có dữ liệu gốc` : item.grade == null ? "Chưa chấm" : `${item.grade}/10`}</b></button>{expanded && <div className="submission-editor">{problems.length ? <ProblemEvidenceList problems={problems} /> : <div className="submission-content"><span>Nội dung nộp</span><pre>{renderContent(item.content)}</pre><small>Phiên cũ chưa có dữ liệu gốc theo từng bài.</small></div>}<div className="grading-grid"><div className="form-field"><label htmlFor={`score-${id}`}>Điểm 0-10</label><input id={`score-${id}`} className="input" type="number" min="0" max="10" step="0.1" value={score} onChange={(event) => setScore(event.target.value)} /></div><div className="form-field"><label htmlFor={`feedback-${id}`}>Feedback</label><textarea id={`feedback-${id}`} className="textarea !min-h-20" value={feedback} onChange={(event) => setFeedback(event.target.value)} /></div></div><button className="primary-button" disabled={saving || !id || Number(score) < 0 || Number(score) > 10} onClick={() => onGrade(id, Number(score), feedback)}>Lưu đánh giá</button></div>}</article>;
+}
+
+const EVIDENCE_ROLE_LABELS: Record<TeacherProblemEvidence["role"], string> = {
+  reinforcement: "P1 · Củng cố",
+  challenge: "P2 · Thử thách",
+  exploration: "P3 · Khám phá",
+  extension: "P4 · Vận dụng",
+};
+
+function ProblemEvidenceList({ problems }: { problems: TeacherProblemEvidence[] }) {
+  return <div className="teacher-problem-evidence-list">{problems.map((problem) => <article className="teacher-problem-evidence" key={`${problem.problem_id}:${problem.bank_problem_id}`}><header><span>{EVIDENCE_ROLE_LABELS[problem.role] || `Bài ${problem.problem_id}`}</span><strong>{problem.terminal_resolution === "SKIPPED" ? "Đã bỏ qua" : problem.solved ? "Đã giải" : "Chưa giải xong"}</strong></header><div className="teacher-evidence-question"><MathContent>{problem.question}</MathContent></div><section><h4>Đáp án đã nộp</h4>{problem.submissions.length ? problem.submissions.map((submission, index) => <div className="teacher-evidence-item" key={submission.correlation_id || `${problem.problem_id}:submission:${index}`}><div><span>Lần {index + 1}</span><small>{evidenceVerdictLabel(submission.answer_verdict)}</small></div><MathContent answer>{submission.content}</MathContent></div>) : <p>Không có đáp án được nộp.</p>}</section><section><h4>Lập luận học sinh đã gửi</h4>{problem.reasoning.length ? problem.reasoning.map((reasoning, index) => <div className="teacher-evidence-item reasoning" key={reasoning.correlation_id || `${problem.problem_id}:reasoning:${index}`}><div><span>Giải thích {index + 1}</span><small>{reasoning.approach_id == null ? "Chưa gắn cách làm" : `Cách làm ${reasoning.approach_id + 1}`}</small></div><MathContent>{reasoning.content}</MathContent></div>) : <p>Chưa có lập luận do học sinh gửi.</p>}</section></article>)}</div>;
+}
+
+function evidenceVerdictLabel(verdict: string) {
+  if (verdict === "CORRECT") return "Đúng";
+  if (verdict === "INCORRECT") return "Chưa đúng";
+  if (verdict === "UNDETERMINED") return "Chưa xác định";
+  return verdict.replaceAll("_", " ").toLocaleLowerCase("vi");
 }
 
 function ActivityList({ items }: { items: Array<{ id?: string; eventType?: string; event_type?: string; createdAt?: string; created_at?: string }> }) {
