@@ -293,7 +293,7 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
           <section className="buddy-pane" data-mobile-active={mobileTab === "buddy"}>
             <div className="buddy-title"><div><span className="buddy-mark"><Sparkle size={18} weight="fill" /></span><div><strong>{activeCompanion.companion_name}</strong><small>Bạn học AI · Gợi mở, không làm hộ</small></div></div>{uiState === "streaming" && <span className="buddy-typing">Đang đọc cách bạn nghĩ</span>}</div>
             <div className="buddy-transcript" ref={transcriptRef}>{messages.map((item) => <article key={item.id} data-role={item.role} data-degraded={item.degraded}><span>{item.role === "buddy" ? activeCompanion.companion_name : "Bạn"}</span>{item.content ? <MathContent>{item.content}</MathContent> : <div className="markdown-body"><TypingPlaceholder /></div>}</article>)}{uiState === "awaiting_reasoning" && <StateNotice type="reasoning" />}{uiState === "clarifying" && <StateNotice type="clarifying" />}{uiState === "farming" && <StateNotice type="farming" />}{uiState === "degraded" && <StateNotice type="degraded" />}{pendingTurn && uiState === "degraded" ? <button type="button" className="student-secondary-button study-retry-turn" onClick={retryPending}>Gửi lại lượt vừa rồi</button> : null}{allComplete && <div className="summit-card"><Flag size={25} weight="fill" /><div><strong>Bạn đã tới đỉnh của phiên học</strong><span>Kết thúc để nhận phản hồi về điểm mạnh và phần nên luyện tiếp.</span></div><button className="student-primary-button" onClick={() => void closeSession()} disabled={uiState === "closing"}>{uiState === "closing" ? "Đang tổng hợp" : "Nhận feedback"}</button></div>}{sessionError && session && <div className="student-form-error" role="alert">{sessionError} <button onClick={() => void closeSession(lastCloseWasEarly)}>Thử lại</button></div>}</div>
-            <form className="buddy-composer" onSubmit={submitChat}><label htmlFor="buddy-message">{uiState === "awaiting_reasoning" ? "Viết cách bạn làm, rồi nộp giải thích" : "Trao đổi cách làm"}</label><MathInputAssist inputRef={buddyMessageRef} value={message} onChange={setMessage} compact /><div><textarea ref={buddyMessageRef} id="buddy-message" rows={1} value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={handleChatKeyDown} placeholder={uiState === "awaiting_reasoning" ? "Ví dụ: Mình chuyển vế rồi chia cả hai vế cho..." : "Mình đang nghĩ là..."} disabled={!isViewingCurrentProblem || uiState === "streaming" || uiState === "closing"} />{uiState === "awaiting_reasoning" ? <button type="button" className="buddy-reasoning-submit" onClick={submitReasoning} disabled={!canSubmitReasoning}>Nộp giải thích</button> : null}<button aria-label="Gửi tin nhắn" title="Gửi như tin nhắn" disabled={!canSendChat}><PaperPlaneTilt size={19} weight="fill" /></button></div></form>
+            <form className="buddy-composer" onSubmit={submitChat}><label htmlFor="buddy-message">{uiState === "awaiting_reasoning" ? "Viết cách bạn làm, rồi nộp giải thích" : "Trao đổi cách làm"}</label><MathInputAssist inputRef={buddyMessageRef} value={message} onChange={setMessage} compact /><div className="buddy-composer-input"><textarea ref={buddyMessageRef} id="buddy-message" rows={1} value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={handleChatKeyDown} placeholder={uiState === "awaiting_reasoning" ? "Ví dụ: Mình chuyển vế rồi chia cả hai vế cho..." : "Mình đang nghĩ là..."} disabled={!isViewingCurrentProblem || uiState === "streaming" || uiState === "closing"} />{uiState === "awaiting_reasoning" ? <button type="button" className="buddy-reasoning-submit" onClick={submitReasoning} disabled={!canSubmitReasoning}>Nộp giải thích</button> : null}<button aria-label="Gửi tin nhắn" title="Gửi như tin nhắn" disabled={!canSendChat}><PaperPlaneTilt size={19} weight="fill" /></button></div></form>
           </section>
         </div>
       ) : null}
@@ -311,7 +311,7 @@ const MATH_KEYS = [
   { label: "∪", insert: " ∪ ", cursorBack: 0 },
   { label: "∩", insert: " ∩ ", cursorBack: 0 },
   { label: "→", insert: " → ", cursorBack: 0 },
-  { label: "vectơ", insert: "\\vec{AB}", cursorBack: 3 },
+  { label: "AB", name: "Vectơ", insert: "\\overrightarrow{AB}", cursorBack: 3 },
 ] as const;
 
 function MathInputAssist({ inputRef, value, onChange, compact = false }: {
@@ -328,8 +328,8 @@ function MathInputAssist({ inputRef, value, onChange, compact = false }: {
     const insertion = selected
       ? token.label === "√"
         ? `sqrt(${selected})`
-        : token.label === "vectơ"
-          ? `\\vec{${selected}}`
+        : "name" in token && token.name === "Vectơ"
+          ? `\\overrightarrow{${selected}}`
           : token.label === "a/b"
             ? `(${selected})/()`
             : `${selected}${token.insert}`
@@ -347,10 +347,10 @@ function MathInputAssist({ inputRef, value, onChange, compact = false }: {
     <div className="math-input-assist" data-compact={compact}>
       <div className="math-input-keys" role="toolbar" aria-label="Phím toán nhanh">
         {MATH_KEYS.map((token) => (
-          <button key={token.label} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => insertMathToken(token)}>{token.label}</button>
+          <button key={token.label} type="button" data-math-key={("name" in token && token.name === "Vectơ") ? "vector" : undefined} aria-label={("name" in token && token.name) || token.label} title={("name" in token && token.name) || token.label} onMouseDown={(event) => event.preventDefault()} onClick={() => insertMathToken(token)}>{token.label}</button>
         ))}
       </div>
-      {value.trim() ? <div className="math-input-preview"><span>Xem trước</span><MathContent>{studentMathPreview(value)}</MathContent></div> : null}
+      {value.trim() ? <div className="math-input-preview"><span>Hiển thị</span><MathContent>{studentMathPreview(value)}</MathContent></div> : null}
     </div>
   );
 }
