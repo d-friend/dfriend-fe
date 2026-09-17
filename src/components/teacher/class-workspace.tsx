@@ -9,6 +9,7 @@ import {
   BookOpenText,
   Check,
   CheckCircle,
+  CaretDown,
   ClipboardText,
   ClockCounterClockwise,
   Copy,
@@ -428,13 +429,20 @@ const EVIDENCE_ROLE_LABELS: Record<TeacherProblemEvidence["role"], string> = {
 };
 
 function ProblemEvidenceList({ problems }: { problems: TeacherProblemEvidence[] }) {
-  return <div className="teacher-problem-evidence-list">{problems.map((problem) => <article className="teacher-problem-evidence" key={`${problem.problem_id}:${problem.bank_problem_id}`}><header><span>{EVIDENCE_ROLE_LABELS[problem.role] || `Bài ${problem.problem_id}`}</span><strong>{problem.terminal_resolution === "SKIPPED" ? "Đã bỏ qua" : problem.solved ? "Đã giải" : "Chưa giải xong"}</strong></header><div className="teacher-evidence-question"><MathContent>{problem.question}</MathContent></div><section><h4>Đáp án đã nộp</h4>{problem.submissions.length ? problem.submissions.map((submission, index) => <div className="teacher-evidence-item" key={submission.correlation_id || `${problem.problem_id}:submission:${index}`}><div><span>Lần {index + 1}</span><small>{evidenceVerdictLabel(submission.answer_verdict)}</small></div><MathContent answer>{submission.content}</MathContent></div>) : <p>Không có đáp án được nộp.</p>}</section><section><h4>Lập luận học sinh đã gửi</h4>{problem.reasoning.length ? problem.reasoning.map((reasoning, index) => <div className="teacher-evidence-item reasoning" key={reasoning.correlation_id || `${problem.problem_id}:reasoning:${index}`}><div><span>Giải thích {index + 1}</span><small>{reasoning.approach_id == null ? "Chưa gắn cách làm" : `Cách làm ${reasoning.approach_id + 1}`}</small></div><MathContent>{reasoning.content}</MathContent></div>) : <p>Chưa có lập luận do học sinh gửi.</p>}</section></article>)}</div>;
+  return <div className="teacher-problem-evidence-list">{problems.map((problem) => <ProblemEvidenceItem problem={problem} key={`${problem.problem_id}:${problem.bank_problem_id}`} />)}</div>;
+}
+
+function ProblemEvidenceItem({ problem }: { problem: TeacherProblemEvidence }) {
+  const [expanded, setExpanded] = useState(false);
+  const status = problem.terminal_resolution === "SKIPPED" ? "Đã bỏ qua" : problem.solved ? "Đã giải" : "Chưa giải xong";
+  return <article className="teacher-problem-evidence" data-expanded={expanded}><button type="button" className="teacher-problem-summary" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}><span className="teacher-problem-meta"><span>{EVIDENCE_ROLE_LABELS[problem.role] || `Bài ${problem.problem_id}`}</span><strong>{status}</strong><CaretDown size={15} weight="bold" /></span><span className="teacher-evidence-question"><MathContent>{problem.question}</MathContent></span></button>{expanded ? <div className="teacher-problem-details"><section><h4>Đáp án đã nộp</h4>{problem.submissions.length ? problem.submissions.map((submission, index) => <div className="teacher-evidence-item" key={submission.correlation_id || `${problem.problem_id}:submission:${index}`}><div><span>Lần {index + 1}</span><small>{evidenceVerdictLabel(submission.answer_verdict)}</small></div><MathContent answer>{submission.content}</MathContent></div>) : <p>Không có đáp án được nộp.</p>}</section><section><h4>Lập luận học sinh đã gửi</h4>{problem.reasoning.length ? problem.reasoning.map((reasoning, index) => <div className="teacher-evidence-item reasoning" key={reasoning.correlation_id || `${problem.problem_id}:reasoning:${index}`}><div><span>Giải thích {index + 1}</span><small>{reasoning.approach_id == null ? "Chưa gắn cách làm" : `Cách làm ${reasoning.approach_id + 1}`}</small></div><MathContent>{reasoning.content}</MathContent></div>) : <p>Chưa có lập luận do học sinh gửi.</p>}</section></div> : null}</article>;
 }
 
 function evidenceVerdictLabel(verdict: string) {
   if (verdict === "CORRECT") return "Đúng";
   if (verdict === "INCORRECT") return "Chưa đúng";
   if (verdict === "UNDETERMINED") return "Chưa xác định";
+  if (verdict === "ARCHIVED") return "Khôi phục từ phiên cũ";
   return verdict.replaceAll("_", " ").toLocaleLowerCase("vi");
 }
 

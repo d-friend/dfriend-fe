@@ -40,20 +40,39 @@ export function studentMathPreview(value: string | null | undefined) {
   return value
     .split("\n")
     .map((line) => {
-      if (!line.trim() || hasMathDelimiter(line) || hasNaturalLanguage(line)) return line;
-      const math = line
-        .replace(/<=|≤/g, "\\leq ")
-        .replace(/>=|≥/g, "\\geq ")
-        .replace(/!=|≠/g, "\\neq ")
-        .replace(/∈/g, "\\in ")
-        .replace(/∪/g, "\\cup ")
-        .replace(/∩/g, "\\cap ")
-        .replace(/→/g, "\\to ")
-        .replace(/sqrt\(([^()]+)\)/g, "\\sqrt{$1}")
-        .replace(/(^|[\s=(])(-?[A-Za-z0-9]+)\/(-?[A-Za-z0-9]+)(?=$|[\s),;+\-])/g, "$1\\frac{$2}{$3}");
+      if (!line.trim() || hasMathDelimiter(line)) return line;
+      if (hasStudentNaturalLanguage(line)) return previewMixedStudentMath(line);
+      const math = normalizeStudentMathSyntax(line);
       return `$${math.trim()}$`;
     })
     .join("\n");
+}
+
+function previewMixedStudentMath(value: string) {
+  const mathToken = /\\(?:overrightarrow|vec)\{[^{}\n]+\}|\\frac\{[^{}\n]+\}\{[^{}\n]+\}|sqrt\([^()\n]+\)|\([^()\s]+\)\s*\/\s*\([^()\s]+\)|-?[A-Za-z0-9]+\/-?[A-Za-z0-9]+|[A-Za-z0-9)]+\^(?:\{[^{}\n]+\}|[-A-Za-z0-9+]+)|<=|>=|!=|≤|≥|≠|∈|∪|∩|→/g;
+  return value.replace(mathToken, (token) => `$${normalizeStudentMathSyntax(token).trim()}$`);
+}
+
+function normalizeStudentMathSyntax(value: string) {
+  return value
+    .replace(/\\vec\{([^{}]+)\}/g, "\\overrightarrow{$1}")
+    .replace(/<=|≤/g, "\\leq ")
+    .replace(/>=|≥/g, "\\geq ")
+    .replace(/!=|≠/g, "\\neq ")
+    .replace(/∈/g, "\\in ")
+    .replace(/∪/g, "\\cup ")
+    .replace(/∩/g, "\\cap ")
+    .replace(/→/g, "\\to ")
+    .replace(/sqrt\(([^()]+)\)/g, "\\sqrt{$1}")
+    .replace(/\(([^()\s]+)\)\s*\/\s*\(([^()\s]+)\)/g, "\\frac{$1}{$2}")
+    .replace(/(^|[\s=(])(-?[A-Za-z0-9]+)\/(-?[A-Za-z0-9]+)(?=$|[\s),;+\-])/g, "$1\\frac{$2}{$3}");
+}
+
+function hasStudentNaturalLanguage(value: string) {
+  // TeX arguments such as AB in \\vec{AB} are symbols, not prose. Remove the
+  // complete command before applying the natural-language safety check.
+  const withoutTexCommands = value.replace(/\\[A-Za-z]+(?:\{[^{}]*\})?/g, " ");
+  return hasNaturalLanguage(withoutTexCommands);
 }
 
 function hasMathDelimiter(value: string) {
@@ -61,7 +80,7 @@ function hasMathDelimiter(value: string) {
 }
 
 function looksLikeTex(value: string) {
-  return /\\(?:frac|dfrac|tfrac|sqrt|left|right|cdot|times|div|pm|neq|leq|geq|sum|prod|int|sin|cos|tan|log|ln|alpha|beta|theta|pi|begin|overline|underline|vec|mathbf|mathrm)\b|[_^](?:\{[^}]+\}|[A-Za-z0-9()+-])/.test(value);
+  return /\\(?:frac|dfrac|tfrac|sqrt|left|right|cdot|times|div|pm|neq|leq|geq|sum|prod|int|sin|cos|tan|log|ln|alpha|beta|theta|pi|begin|overline|overrightarrow|underline|vec|mathbf|mathrm)\b|[_^](?:\{[^}]+\}|[A-Za-z0-9()+-])/.test(value);
 }
 
 function hasNaturalLanguage(value: string) {
