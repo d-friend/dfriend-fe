@@ -27,7 +27,7 @@ export function DocumentsWorkspace() {
   const [query, setQuery] = useState("");
   const [uploadOpen, setUploadOpen] = useState(false);
   const [dragging, setDragging] = useState(false);
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [subject, setSubject] = useState("");
@@ -45,7 +45,7 @@ export function DocumentsWorkspace() {
   const topics = useMemo(() => curriculumQuery.data?.find((item) => item.value === subject)?.topics || [], [curriculumQuery.data, subject]);
   const concepts = useMemo(() => topics.find((item) => item.value === topic)?.concepts || [], [topics, topic]);
   const taxonomyVersion = curriculumQuery.data?.find((item) => item.value === subject)?.taxonomy_version;
-  const canUpload = Boolean(file && title.trim() && subject && topic && taxonomyVersion);
+  const canUpload = Boolean(files.length && (files.length > 1 || title.trim()) && subject && topic && taxonomyVersion);
   const filtered = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase("vi");
     if (!needle) return documentsQuery.data || [];
@@ -57,19 +57,44 @@ export function DocumentsWorkspace() {
   }, [documentsQuery.data, query]);
 
   const upload = useMutation({
-    mutationFn: teacherApi.uploadDocument,
-    onSuccess: async (result) => {
-      setSuccess("Đã lưu tài liệu vào kho bài tập.");
-      setError("");
-      setFile(null);
-      setTitle("");
-      setDescription("");
-      setSubject("");
-      setTopic("");
-      setConcept("");
-      setShared(true);
+    mutationFn: async (selectedFiles: File[]) => {
+      const results = await Promise.all(selectedFiles.map(async (selectedFile) => {
+        const body = new FormData();
+        body.append("file", selectedFile);
+        body.append("title", selectedFiles.length === 1 ? title.trim() : fileTitle(selectedFile));
+        body.append("description", description.trim());
+        body.append("subject", subject);
+        body.append("topic", topic);
+        body.append("taxonomyVersion", String(taxonomyVersion));
+        if (concept) body.append("concept", concept);
+        body.append("shared", shared ? "true" : "false");
+        try {
+          const result = await teacherApi.uploadDocument(body);
+          return { file: selectedFile, result } as const;
+        } catch (uploadError) {
+          return { file: selectedFile, error: getApiErrorMessage(uploadError, "Không thể tải lên.") } as const;
+        }
+      }));
+      return {
+        uploaded: results.filter((item) => "result" in item),
+        failed: results.filter((item) => "error" in item),
+      };
+    },
+    onSuccess: async ({ uploaded, failed }) => {
+      setFiles(failed.map((item) => item.file));
+      setSuccess(uploaded.length ? `Đã lưu ${uploaded.length} tài liệu vào kho.` : "");
+      setError(failed.length ? `${failed.length} tệp chưa tải được: ${failed.map((item) => `${item.file.name} (${item.error})`).join("; ")}` : "");
+      if (!failed.length) {
+        setTitle("");
+        setDescription("");
+        setSubject("");
+        setTopic("");
+        setConcept("");
+        setShared(true);
+      } else if (failed.length === 1) {
+        setTitle(fileTitle(failed[0].file));
+      }
       await queryClient.invalidateQueries({ queryKey: ["teacher", "documents"] });
-      window.setTimeout(() => setSuccess(result.message || "Đã lưu tài liệu."), 0);
     },
     onError: (uploadError) => setError(getApiErrorMessage(uploadError, "Không thể tải tài liệu lên.")),
   });
@@ -84,46 +109,45 @@ export function DocumentsWorkspace() {
     onError: (retryError) => setError(getApiErrorMessage(retryError, "Không thể lập chỉ mục lại tài liệu.")),
   });
 
-  function chooseFile(next: File | null) {
+  function chooseFiles(nextFiles: File[]) {
     setError("");
-    if (!next) return;
-    const extension = next.name.split(".").pop()?.toLowerCase() || "";
-    if (!acceptedExtensions.includes(extension)) {
-      setError("Chỉ hỗ trợ PDF, DOCX, Markdown và TXT.");
-      return;
-    }
-    if (next.size > 10 * 1024 * 1024) {
-      setError("Tệp vượt quá giới hạn 10 MB.");
-      return;
-    }
-    setFile(next);
-    if (!title) setTitle(next.name.replace(/\.[^.]+$/, ""));
+    setSuccess("");
+    if (!nextFiles.length) return;
+    const rejected: string[] = [];
+    const valid = nextFiles.filter((next) => {
+      const extension = next.name.split(".").pop()?.toLowerCase() || "";
+      if (!acceptedExtensions.includes(extension)) {
+        rejected.push(`${next.name}: định dạng không được hỗ trợ`);
+        return false;
+      }
+      if (next.size > 10 * 1024 * 1024) {
+        rejected.push(`${next.name}: vượt quá 10 MB`);
+        return false;
+      }
+      return true;
+    });
+    const combined = deduplicateFiles([...files, ...valid]);
+    setFiles(combined);
+    if (combined.length === 1) setTitle((current) => current || fileTitle(combined[0]));
+    if (combined.length > 1) setTitle("");
+    if (rejected.length) setError(`Đã bỏ qua ${rejected.join("; ")}.`);
   }
 
   function drop(event: DragEvent) {
     event.preventDefault();
     setDragging(false);
-    chooseFile(event.dataTransfer.files?.[0] || null);
+    chooseFiles(Array.from(event.dataTransfer.files || []));
   }
 
   function submit(event: FormEvent) {
     event.preventDefault();
     setError("");
     setSuccess("");
-    if (!file || !title.trim() || !subject || !topic || !taxonomyVersion) {
-      setError("Chọn đủ môn, chủ đề, tên tài liệu và tệp trước khi tải lên.");
+    if (!files.length || (files.length === 1 && !title.trim()) || !subject || !topic || !taxonomyVersion) {
+      setError("Chọn đủ môn, chủ đề và ít nhất một tệp trước khi tải lên.");
       return;
     }
-    const body = new FormData();
-    body.append("file", file);
-    body.append("title", title.trim());
-    body.append("description", description.trim());
-    body.append("subject", subject);
-    body.append("topic", topic);
-    body.append("taxonomyVersion", String(taxonomyVersion));
-    if (concept) body.append("concept", concept);
-    body.append("shared", shared ? "true" : "false");
-    upload.mutate(body);
+    upload.mutate(files);
   }
 
   return (
@@ -171,10 +195,11 @@ export function DocumentsWorkspace() {
                 {concepts.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
               </select>
             </div>
-            <div className="form-field col-span-full">
+            {files.length <= 1 && <div className="form-field col-span-full">
               <label htmlFor="document-title">Tên tài liệu</label>
               <input id="document-title" className="input" value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Ví dụ: Bộ bài tập Đơn thức" required />
-            </div>
+            </div>}
+            {files.length > 1 && <p className="upload-batch-note col-span-full">Mỗi tài liệu sẽ dùng tên tệp làm tên trong kho. Taxonomy và ghi chú bên dưới áp dụng cho cả {files.length} tệp.</p>}
             <div className="form-field col-span-full">
               <label htmlFor="document-description">Ghi chú</label>
               <textarea id="document-description" className="textarea !min-h-20" value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Nguồn, khối lớp hoặc cách bạn muốn dùng tài liệu" />
@@ -189,16 +214,17 @@ export function DocumentsWorkspace() {
               onDragLeave={() => setDragging(false)}
               onDrop={drop}
             >
-              <input ref={fileInput} type="file" hidden accept=".pdf,.docx,.md,.txt" onChange={(event) => chooseFile(event.target.files?.[0] || null)} />
-              {file ? <><FilePdf size={24} /><span><strong>{file.name}</strong><small>{formatBytes(file.size)}</small></span></> : <><UploadSimple size={24} /><span><strong>Kéo tệp vào đây hoặc chọn từ máy</strong><small>PDF, DOCX, MD, TXT, tối đa 10 MB</small></span></>}
+              <input ref={fileInput} type="file" multiple hidden accept=".pdf,.docx,.md,.txt" onChange={(event) => { chooseFiles(Array.from(event.target.files || [])); event.currentTarget.value = ""; }} />
+              {files.length ? <><FilePdf size={24} /><span><strong>Đã chọn {files.length} tệp</strong><small>Chọn thêm hoặc kéo thêm tệp vào đây</small></span></> : <><UploadSimple size={24} /><span><strong>Kéo nhiều tệp vào đây hoặc chọn từ máy</strong><small>PDF, DOCX, MD, TXT, mỗi tệp tối đa 10 MB</small></span></>}
             </button>
+            {files.length > 0 && <div className="upload-file-list col-span-full">{files.map((selectedFile) => <div key={fileKey(selectedFile)}><span><File size={16} /><strong>{selectedFile.name}</strong><small>{formatBytes(selectedFile.size)}</small></span><button type="button" className="icon-button" aria-label={`Bỏ ${selectedFile.name}`} disabled={upload.isPending} onClick={() => { const remaining = files.filter((item) => fileKey(item) !== fileKey(selectedFile)); setFiles(remaining); setTitle(remaining.length === 1 ? fileTitle(remaining[0]) : ""); }}><X size={15} /></button></div>)}</div>}
             <label className="share-toggle col-span-full">
               <input type="checkbox" checked={shared} onChange={(event) => setShared(event.target.checked)} />
               <span className="toggle-track"><span /></span>
               <span>{shared ? <UsersThree size={18} /> : <LockSimple size={18} />}<strong>{shared ? "Chia sẻ với kho chung" : "Chỉ mình tôi"}</strong><small>{shared ? "Giáo viên khác có thể dùng bài tập từ tài liệu này." : "Tài liệu chỉ xuất hiện trong kết quả của bạn."}</small></span>
             </label>
             <div className="col-span-full flex justify-end">
-              <button className="primary-button" type="submit" disabled={upload.isPending || !canUpload} title={canUpload ? undefined : "Chọn môn, chủ đề, tên tài liệu và tệp trước khi lưu"}>{upload.isPending ? "Đang lưu tài liệu" : "Lưu vào kho"}</button>
+              <button className="primary-button" type="submit" disabled={upload.isPending || !canUpload} title={canUpload ? undefined : "Chọn môn, chủ đề và ít nhất một tệp trước khi lưu"}>{upload.isPending ? `Đang lưu ${files.length} tài liệu` : files.length > 1 ? `Lưu ${files.length} tài liệu` : "Lưu vào kho"}</button>
             </div>
           </div>
         </form>
@@ -236,6 +262,18 @@ export function DocumentsWorkspace() {
 function formatBytes(value: number) {
   if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`;
   return `${(value / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function fileTitle(file: File) {
+  return file.name.replace(/\.[^.]+$/, "");
+}
+
+function fileKey(file: File) {
+  return `${file.name}:${file.size}:${file.lastModified}`;
+}
+
+function deduplicateFiles(files: File[]) {
+  return Array.from(new Map(files.map((file) => [fileKey(file), file])).values());
 }
 
 function formatDate(value: string) {
