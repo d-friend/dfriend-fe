@@ -5958,6 +5958,54 @@ button:disabled {
   font-size: 0.8rem;
 }
 
+.upload-batch-note {
+  border-left: 3px solid var(--brand);
+  border-radius: 0.35rem;
+  background: var(--brand-soft);
+  color: var(--muted);
+  padding: 0.65rem 0.75rem;
+  font-size: 0.76rem;
+  line-height: 1.5;
+}
+
+.upload-file-list {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.upload-file-list > div {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 0.65rem;
+  background: var(--surface);
+  padding: 0.55rem 0.65rem;
+}
+
+.upload-file-list > div > span {
+  display: grid;
+  min-width: 0;
+  align-items: center;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0.5rem;
+}
+
+.upload-file-list strong {
+  overflow: hidden;
+  font-size: 0.76rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upload-file-list small {
+  color: var(--muted);
+  font-size: 0.68rem;
+  white-space: nowrap;
+}
+
 .dropzone small {
   margin-top: 0.2rem;
   font-size: 0.7rem;
