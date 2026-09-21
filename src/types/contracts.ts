@@ -419,6 +419,7 @@ export interface CopilotReportDetail extends CopilotReportSummary {
     on_track_student_ids?: string[];
     not_finished_student_ids: string[];
     not_assessed_student_ids?: string[];
+    skipped_problem_ids_by_student?: Record<string, number[]>;
     not_assessed_skill_ids?: string[];
     top_weak_skill_ids: string[];
     attention_reasons: Record<string, string[]>;
@@ -431,7 +432,7 @@ export interface CopilotReportDetail extends CopilotReportSummary {
       cumulative_average?: number | null;
       correctness: number;
       independence: number;
-      reasoning: number;
+      reasoning: number | null;
       transfer?: number | null;
     }>;
     follow_up_skill_deltas?: Record<string, {
@@ -714,6 +715,10 @@ export interface PostMasteryCriterion {
 }
 
 export interface PostMasteryReport {
+  total_problem_count?: number;
+  resolved_problem_count?: number;
+  assessed_problem_count?: number;
+  skipped_problem_ids?: number[];
   score?: number | null;
   metrics?: PostMasteryMetricSet | null;
   strengths?: PostMasterySkillEvidence[];
