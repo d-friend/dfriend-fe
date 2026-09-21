@@ -529,19 +529,21 @@ export function DraftProblemList({
   guidance,
   onToggle,
   onGuidanceChange,
+  readOnly = false,
 }: {
   problems: ProblemView[];
   rejected: Set<string>;
   guidance: RegenerationGuidanceByProblem;
   onToggle: (id: string) => void;
   onGuidanceChange: (id: string, field: keyof RegenerationGuidance, value: string) => void;
+  readOnly?: boolean;
 }) {
   if (!problems.length) return <div className="list-empty"><Lightbulb size={26} /><h3>Chưa tìm thấy danh sách bài</h3><p>Bản nháp có thể cần được tạo lại.</p></div>;
   return <div className="draft-problem-list">{problems.map((problem, index) => {
     const needsReplacement = rejected.has(problem.id);
     const itemGuidance = guidance[problem.id] || { reason: "", requestedChange: "" };
     return <article key={problem.id} data-rejected={needsReplacement}>
-      <header><span>{String(index + 1).padStart(2, "0")}</span><div><strong>{problem.role ? masteryRoleLabels[problem.role] || problem.role : "Bài luyện tập"}</strong><small>{problem.skill || "Theo mục tiêu bài học"}</small>{problemSourceLabel(problem) && <small className="problem-origin">{problemSourceLabel(problem)}</small>}</div><button className={needsReplacement ? "secondary-button" : "text-button"} onClick={() => onToggle(problem.id)}>{needsReplacement ? "Giữ lại" : "Cần thay"}</button></header>
+      <header><span>{String(index + 1).padStart(2, "0")}</span><div><strong>{problem.role ? masteryRoleLabels[problem.role] || problem.role : "Bài luyện tập"}</strong><small>{problem.skill || "Theo mục tiêu bài học"}</small>{problemSourceLabel(problem) && <small className="problem-origin">{problemSourceLabel(problem)}</small>}</div>{!readOnly && <button className={needsReplacement ? "secondary-button" : "text-button"} onClick={() => onToggle(problem.id)}>{needsReplacement ? "Giữ lại" : "Cần thay"}</button>}</header>
       <MathContent>{problem.prompt}</MathContent>
       {problem.choices?.length ? <ol type="A">{problem.choices.map((choice, choiceIndex) => <li key={`${problem.id}:${choiceIndex}`}><MathContent answer>{choice}</MathContent></li>)}</ol> : null}
       {problem.answer ? <div className="draft-answer"><span>Đáp án</span><MathContent answer>{problem.answer}</MathContent></div> : null}
@@ -555,13 +557,13 @@ export function DraftProblemList({
   })}</div>;
 }
 
-export function DraftReviewContent({ review, rejected, guidance, onToggle, onGuidanceChange }: { review: DraftReviewModel; rejected: Set<string>; guidance: RegenerationGuidanceByProblem; onToggle: (id: string) => void; onGuidanceChange: (id: string, field: keyof RegenerationGuidance, value: string) => void }) {
+export function DraftReviewContent({ review, rejected, guidance, onToggle, onGuidanceChange, readOnly = false }: { review: DraftReviewModel; rejected: Set<string>; guidance: RegenerationGuidanceByProblem; onToggle: (id: string) => void; onGuidanceChange: (id: string, field: keyof RegenerationGuidance, value: string) => void; readOnly?: boolean }) {
   const hasContent = review.knowledgeSections.length || review.knowledgeProblems.length || review.masteryProblems.length;
   if (!hasContent) return <div className="list-empty"><Lightbulb size={26} /><h3>Bản nháp chưa có nội dung</h3><p>Thử tạo lại bài học để tải đủ phần kiến thức và luyện tập.</p></div>;
   return <div className="draft-review-content">
     {review.knowledgeSections.length > 0 && <section id="session-1-knowledge" className="draft-review-section"><header><div><span>Session 1</span><h2>Nội dung kiến thức</h2></div><small>{review.knowledgeSections.length} phần</small></header><div className="draft-knowledge-list">{review.knowledgeSections.map((section, index) => <article key={section.id}><span>Phần {String(index + 1).padStart(2, "0")}</span><h3>{section.title}</h3><MathContent>{section.content}</MathContent></article>)}</div></section>}
-    {review.knowledgeProblems.length > 0 && <section id="session-1-checkpoints" className="draft-review-section"><header><div><span>Session 1</span><h2>Câu kiểm tra kiến thức</h2></div><small>{review.knowledgeProblems.length} câu</small></header><DraftProblemList problems={review.knowledgeProblems} rejected={rejected} guidance={guidance} onToggle={onToggle} onGuidanceChange={onGuidanceChange} /></section>}
-    {review.masteryProblems.length > 0 && <section id="session-2-mastery" className="draft-review-section"><header><div><span>Session 2</span><h2>Bài luyện tập mastery</h2></div><small>{review.masteryProblems.length} bài</small></header><DraftProblemList problems={review.masteryProblems} rejected={rejected} guidance={guidance} onToggle={onToggle} onGuidanceChange={onGuidanceChange} /></section>}
+    {review.knowledgeProblems.length > 0 && <section id="session-1-checkpoints" className="draft-review-section"><header><div><span>Session 1</span><h2>Câu kiểm tra kiến thức</h2></div><small>{review.knowledgeProblems.length} câu</small></header><DraftProblemList problems={review.knowledgeProblems} rejected={rejected} guidance={guidance} onToggle={onToggle} onGuidanceChange={onGuidanceChange} readOnly={readOnly} /></section>}
+    {review.masteryProblems.length > 0 && <section id="session-2-mastery" className="draft-review-section"><header><div><span>Session 2</span><h2>Bài luyện tập mastery</h2></div><small>{review.masteryProblems.length} bài</small></header><DraftProblemList problems={review.masteryProblems} rejected={rejected} guidance={guidance} onToggle={onToggle} onGuidanceChange={onGuidanceChange} readOnly={readOnly} /></section>}
   </div>;
 }
 
