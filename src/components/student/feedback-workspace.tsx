@@ -45,9 +45,9 @@ export function FeedbackWorkspace({ lessonId }: { lessonId: string }) {
   const evidenceItems = [...strengths, ...gaps, ...developing].flatMap((item) => item.evidence || []);
   const finishedCount = new Set(evidenceItems.map((item) => item.problem_id)).size;
   const progressPercent = clamp(reportQuery.data?.sessionProgress || 0, 0, 100);
-  const expectedCount = Math.max(finishedCount, 4);
+  const expectedCount = masteryReport?.total_problem_count || Math.max(finishedCount, 4);
   const progressCompletedCount = Math.round((progressPercent / 100) * expectedCount);
-  const completedCount = Math.min(
+  const completedCount = masteryReport?.resolved_problem_count ?? Math.min(
     expectedCount,
     Math.max(finishedCount, progressCompletedCount),
   );
@@ -82,6 +82,7 @@ export function FeedbackWorkspace({ lessonId }: { lessonId: string }) {
           <span>Bài đã đi qua</span>
           <strong>{completedCount}/{expectedCount}</strong>
           <small>{Math.round(progressPercent)}% tiến độ</small>
+          {masteryReport?.skipped_problem_ids?.length ? <small>{masteryReport.skipped_problem_ids.length} bài bỏ qua · {masteryReport.assessed_problem_count ?? finishedCount} bài có dữ liệu đánh giá</small> : null}
         </div>
       </motion.section>
 
