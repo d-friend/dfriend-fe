@@ -220,6 +220,7 @@ export interface TeacherRoadmapItem {
   type: "exercise";
   questionsCount: number;
   completedCount: number;
+  taxonomyVersion?: number;
   contentRevision?: number;
   pdfArtifact?: LessonPdfArtifact | null;
   teacherPdfArtifact?: LessonPdfArtifact | null;

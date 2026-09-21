@@ -4716,6 +4716,22 @@ button:disabled {
 
 .review-state.draft { background: var(--color-surface-container); color: var(--color-on-surface-variant); }
 .review-state.approved { background: color-mix(in srgb, var(--color-ok) 12%, white); color: #047857; }
+.review-state.published { background: color-mix(in srgb, var(--color-ok) 16%, white); color: #047857; }
+
+.published-review-notice {
+  width: min(1520px, calc(100% - clamp(36px, 6vw, 96px)));
+  margin: 24px auto 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--color-ok) 28%, var(--color-outline-variant));
+  border-radius: var(--radius-control);
+  background: color-mix(in srgb, var(--color-ok) 8%, var(--color-surface));
+  color: #047857;
+}
+
+.published-review-notice p { margin-top: 2px; color: var(--color-on-surface-variant); font-size: .82rem; }
 
 .draft-review-shell {
   width: min(1520px, 100%);
@@ -6884,6 +6900,7 @@ button:disabled {
 }
 
 .detail-content > h2,
+.lesson-detail-heading h2,
 .student-profile-heading h2 {
   margin-top: 0.2rem;
   font-size: 1.42rem;
@@ -7092,6 +7109,29 @@ button:disabled {
 }
 
 .lesson-pdf-actions button { flex: 1; justify-content: center; }
+
+.lesson-detail-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.85rem;
+}
+
+.lesson-detail-heading > div { min-width: 0; }
+
+.lesson-review-link {
+  min-height: 2.15rem;
+  flex: none;
+  gap: 0.35rem;
+  border-radius: 0.58rem;
+  padding: 0.45rem 0.65rem;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+@media (max-width: 520px) {
+  .lesson-detail-heading { align-items: flex-start; flex-direction: column; }
+}
 
 .muted-copy {
   color: var(--muted);

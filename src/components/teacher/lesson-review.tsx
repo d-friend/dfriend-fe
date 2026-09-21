@@ -75,6 +75,7 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
   });
   const classes = useQuery({ queryKey: ["teacher", "classes"], queryFn: teacherApi.classes });
   const draft = draftQuery.data;
+  const isPublished = published || draft?.status === "published" || Boolean(draft?.published_at);
   const kind = String(draft?.kind || draft?.lesson_kind || "main");
   const followUp = kind === "remedial" || kind === "advanced";
   const review = useMemo(() => normalizeDraftReview(draft), [draft]);
@@ -195,8 +196,6 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
   if (!Number.isInteger(taxonomyVersion) || taxonomyVersion < 1) return <div className="lesson-immersive"><div className="center-state"><WarningCircle size={30} /><h1>Thiếu taxonomy version</h1><p>Link review không xác định phiên bản taxonomy nên không thể mở an toàn.</p><button className="secondary-button" onClick={() => router.back()}>Quay lại</button></div></div>;
   if (draftQuery.isLoading) return <div className="lesson-immersive"><div className="review-layout"><div className="skeleton h-28" /><div className="skeleton h-96 mt-5" /></div></div>;
   if (draftQuery.isError) return <div className="lesson-immersive"><div className="center-state"><WarningCircle size={30} /><h1>Không mở được bản nháp</h1><p>{getApiErrorMessage(draftQuery.error)}</p><button className="secondary-button" onClick={() => router.back()}>Quay lại</button></div></div>;
-  if (published) return <div className="lesson-immersive"><div className="publish-success"><span><CheckCircle size={32} weight="fill" /></span><h1>Đã xuất bản bài học</h1><p>{followUp ? "Bài tập đã được gửi đúng nhóm học sinh." : "Các lớp đã nhận được bài học mới."}</p><button className="primary-button" onClick={() => router.push(selectedClassIds[0] ? `/teacher/classes/${selectedClassIds[0]}?tab=learning-path` : "/teacher/classes")}>Về lớp học</button></div></div>;
-
   const reviewMutationPending =
     approve.isPending ||
     regenerate.isPending ||
@@ -238,16 +237,18 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
     <section className="lesson-immersive draft-review-page">
       <header className="draft-review-actionbar">
         <button className="text-button" onClick={() => router.back()}><ArrowLeft size={16} /> Quay lại</button>
-        <span className={`review-state ${approved ? "approved" : "draft"}`}><ShieldCheck size={16} /> {approved ? `Đã duyệt · bản ${revision}` : `Bản nháp · bản ${revision}`}</span>
+        <span className={`review-state ${isPublished ? "published" : approved ? "approved" : "draft"}`}><ShieldCheck size={16} /> {isPublished ? `Đã xuất bản · bản ${revision}` : approved ? `Đã duyệt · bản ${revision}` : `Bản nháp · bản ${revision}`}</span>
         <div>
-          {rejected.size > 0 && <button className="secondary-button" onClick={() => regenerate.mutate()} disabled={reviewMutationPending}>{regenerate.isPending ? <CircleNotch className="animate-spin" size={16} /> : <ArrowsClockwise size={16} />} Soạn lại {rejected.size} câu</button>}
-          {poolDeficitCount > 0 && <button className="secondary-button" onClick={() => completePool.mutate()} disabled={reviewMutationPending}>{completePool.isPending ? <CircleNotch className="animate-spin" size={16} /> : <ArrowsClockwise size={16} />} Bù {poolDeficitCount} bài còn thiếu</button>}
-          {!approved && <button className="secondary-button" onClick={() => approve.mutate()} disabled={reviewMutationPending || !hasCompleteArc || rejected.size > 0}>{approve.isPending ? <CircleNotch className="animate-spin" size={16} /> : <Check size={16} />} Duyệt arc sẵn sàng</button>}
+          {!isPublished && rejected.size > 0 && <button className="secondary-button" onClick={() => regenerate.mutate()} disabled={reviewMutationPending}>{regenerate.isPending ? <CircleNotch className="animate-spin" size={16} /> : <ArrowsClockwise size={16} />} Soạn lại {rejected.size} câu</button>}
+          {!isPublished && poolDeficitCount > 0 && <button className="secondary-button" onClick={() => completePool.mutate()} disabled={reviewMutationPending}>{completePool.isPending ? <CircleNotch className="animate-spin" size={16} /> : <ArrowsClockwise size={16} />} Bù {poolDeficitCount} bài còn thiếu</button>}
+          {!isPublished && !approved && <button className="secondary-button" onClick={() => approve.mutate()} disabled={reviewMutationPending || !hasCompleteArc || rejected.size > 0}>{approve.isPending ? <CircleNotch className="animate-spin" size={16} /> : <Check size={16} />} Duyệt arc sẵn sàng</button>}
           {!followUp && <button className="secondary-button" disabled={pdfDisabled || pdfArtifactQuery.isLoading} onClick={handlePdfAction}>{pdfGenerating ? <CircleNotch className="animate-spin" size={16} /> : pdfArtifact?.status === "READY" ? <ArrowSquareOut size={16} /> : <FilePdf size={16} />} {pdfGenerating ? "Đang tạo" : pdfArtifact?.status === "READY" ? "Bản học sinh" : pdfArtifact?.status === "FAILED" ? "Thử lại PDF HS" : "Xuất PDF HS"}</button>}
           {!followUp && <button className="secondary-button" disabled={pdfDisabled || teacherPdfArtifactQuery.isLoading} onClick={handleTeacherPdfAction}>{teacherPdfGenerating ? <CircleNotch className="animate-spin" size={16} /> : teacherPdfArtifact?.status === "READY" ? <ArrowSquareOut size={16} /> : <FilePdf size={16} />} {teacherPdfGenerating ? "Đang tạo" : teacherPdfArtifact?.status === "READY" ? "Bản giáo viên" : teacherPdfArtifact?.status === "FAILED" ? "Thử lại PDF GV" : "Xuất PDF GV"}</button>}
-          <button className="primary-button" disabled={publishDisabled} onClick={() => publish.mutate()}><Check size={16} /> {publish.isPending ? "Đang xuất bản" : "Xuất bản"}</button>
+          {isPublished ? <button className="primary-button" onClick={() => router.push(selectedClassIds[0] ? `/teacher/classes/${selectedClassIds[0]}?tab=learning-path` : "/teacher/classes")}><ArrowLeft size={16} /> Về lớp học</button> : <button className="primary-button" disabled={publishDisabled} onClick={() => publish.mutate()}><Check size={16} /> {publish.isPending ? "Đang xuất bản" : "Xuất bản"}</button>}
         </div>
       </header>
+
+      {isPublished && <div className="published-review-notice" role="status"><CheckCircle size={22} weight="fill" /><div><strong>Bài học đã được xuất bản</strong><p>Đây là bản nội dung giáo viên đã duyệt và gửi cho học sinh.</p></div></div>}
 
       <div className="draft-review-shell">
         <nav className="draft-review-toc" aria-label="Mục lục bản nháp">
@@ -260,18 +261,18 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
         <main className="draft-review-main">
           <header className="draft-review-title">
             <p className="workspace-kicker">{followUp ? kind === "remedial" ? "Bài phụ đạo" : "Bài nâng cao" : "Bản nháp Copilot"}</p>
-            {followUp ? <h1>{suggestedTitle}</h1> : <label className="review-title-field"><span>Tên bài học</span><input value={title} onChange={(event) => setTitleOverride(event.target.value)} maxLength={120} placeholder="Nhập tên bài học" /></label>}
+            {followUp ? <h1>{suggestedTitle}</h1> : <label className="review-title-field"><span>Tên bài học</span><input value={title} onChange={(event) => setTitleOverride(event.target.value)} maxLength={120} placeholder="Nhập tên bài học" readOnly={isPublished} /></label>}
             <p>{goal}</p>
           </header>
           {(error || blockers.length > 0) && <div className="publish-blockers"><WarningCircle size={22} /><div><strong>{error}</strong>{blockers.map((item, index) => <p key={index}>{blockerLabel(item)}</p>)}</div></div>}
           {notices.length > 0 && <div className="publish-blockers" role="status"><WarningCircle size={22} /><div><strong>Nguồn bài và fallback</strong>{notices.map((notice, index) => <p key={`${notice.code}:${index}`}><b>{noticeLabel(notice.code)}</b>: {notice.detail || "Hãy kiểm tra các bài được đánh dấu trước khi xuất bản."}{notice.slotIds.length ? ` (${notice.slotIds.length} slot)` : ""}</p>)}</div></div>}
           {completePool.data?.failed_slots?.length ? <div className="publish-blockers"><WarningCircle size={22} /><div><strong>Một số slot chưa bù được</strong>{completePool.data.failed_slots.map((slot) => <p key={slot.slot_id}>{slot.slot_id}: {slot.reason}</p>)}</div></div> : null}
-          {hasNonMasteryContent || !matrix ? <DraftReviewContent review={contentWithoutMastery} rejected={rejected} guidance={regenerationGuidance} onToggle={toggleRejected} onGuidanceChange={updateRegenerationGuidance} /> : null}
-          {matrix ? <MasteryArcMatrix matrix={matrix} problems={problemByBankId} completeArcIds={completeArcIds} rejected={rejected} guidance={regenerationGuidance} onToggle={toggleRejected} onGuidanceChange={updateRegenerationGuidance} kind={kind} /> : null}
+          {hasNonMasteryContent || !matrix ? <DraftReviewContent review={contentWithoutMastery} rejected={rejected} guidance={regenerationGuidance} onToggle={toggleRejected} onGuidanceChange={updateRegenerationGuidance} readOnly={isPublished} /> : null}
+          {matrix ? <MasteryArcMatrix matrix={matrix} problems={problemByBankId} completeArcIds={completeArcIds} rejected={rejected} guidance={regenerationGuidance} onToggle={toggleRejected} onGuidanceChange={updateRegenerationGuidance} kind={kind} readOnly={isPublished} /> : null}
         </main>
 
         <aside className="draft-review-settings">
-          {!followUp && <><section><h2>Lớp nhận bài</h2><div className="class-picker vertical">{(classes.data || []).map((item) => <label key={item.class_id}><input type="checkbox" checked={selectedClassIds.includes(item.class_id)} onChange={(event) => setClassIds(event.target.checked ? [...selectedClassIds, item.class_id] : selectedClassIds.filter((id) => id !== item.class_id))} /><span><strong>{item.class_name}</strong><small>{item.student_count} học sinh</small></span></label>)}</div></section><section><h2>Deadline</h2><input className="input" type="datetime-local" value={deadline} onChange={(event) => setDeadline(event.target.value)} /></section></>}
+          {!followUp && <><section><h2>Lớp nhận bài</h2><div className="class-picker vertical">{(classes.data || []).map((item) => <label key={item.class_id}><input type="checkbox" checked={selectedClassIds.includes(item.class_id)} disabled={isPublished} onChange={(event) => setClassIds(event.target.checked ? [...selectedClassIds, item.class_id] : selectedClassIds.filter((id) => id !== item.class_id))} /><span><strong>{item.class_name}</strong><small>{item.student_count} học sinh</small></span></label>)}</div></section><section><h2>Deadline</h2><input className="input" type="datetime-local" value={deadline} readOnly={isPublished} onChange={(event) => setDeadline(event.target.value)} /></section></>}
           <section><h2>Độ phủ</h2><Coverage draft={draft} /></section>
           <BlueprintSummary draft={draft} completeArcCount={completeArcIds.length} missingSlotCount={poolDeficitCount} />
           <section><h2>Nguồn nội dung</h2><p>Kiến thức: {provenanceLabel((draft?.knowledge as Record<string, unknown> | undefined)?.provenance)}</p><p>Bài luyện tập: {provenanceLabel(draft?.mastery_provenance)}</p></section>
@@ -319,6 +320,7 @@ function MasteryArcMatrix({
   onToggle,
   onGuidanceChange,
   kind,
+  readOnly = false,
 }: {
   matrix: BlueprintModel;
   problems: Map<string, ProblemView>;
@@ -328,6 +330,7 @@ function MasteryArcMatrix({
   onToggle: (id: string) => void;
   onGuidanceChange: (id: string, field: keyof RegenerationGuidance, value: string) => void;
   kind: string;
+  readOnly?: boolean;
 }) {
   const firstReadyArc = matrix.arcs.find((arc) => completeArcIds.includes(arc.arc_id));
   const [selectedArcId, setSelectedArcId] = useState(firstReadyArc?.arc_id || matrix.arcs[0]?.arc_id || "");
@@ -413,7 +416,7 @@ function MasteryArcMatrix({
                 </div>
                 <div className="mastery-problem-content">
                   {problem ? (
-                    <DraftProblemList problems={[problem]} rejected={rejected} guidance={guidance} onToggle={onToggle} onGuidanceChange={onGuidanceChange} />
+                    <DraftProblemList problems={[problem]} rejected={rejected} guidance={guidance} onToggle={onToggle} onGuidanceChange={onGuidanceChange} readOnly={readOnly} />
                   ) : (
                     <div className="mastery-slot-empty"><WarningCircle size={18} /><span>Chưa có bài cho bước này</span></div>
                   )}
