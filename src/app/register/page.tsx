@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import {
   ArrowRight,
   CheckCircle,
@@ -34,6 +34,14 @@ export default function RegisterPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [created, setCreated] = useState(false);
+
+  useEffect(() => {
+    const email = new URLSearchParams(window.location.search).get("email")?.trim();
+
+    if (email) {
+      setForm((current) => ({ ...current, email }));
+    }
+  }, []);
 
   function update(field: keyof RegisterForm, value: string) {
     setForm((current) => ({ ...current, [field]: value }));
