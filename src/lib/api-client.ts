@@ -18,6 +18,7 @@ import type {
   CurriculumSubject,
   ExerciseDocument,
   LessonPdfArtifact,
+  LessonReportExport,
   ProductEventPage,
   StudentInClass,
   TeacherClass,
@@ -241,6 +242,12 @@ export const teacherApi = {
     (
       await apiClient.get<TeacherSubmission[]>(
         `/teacher/classes/${classId}/students/${studentId}/submissions`,
+      )
+    ).data,
+  lessonReportExport: async (classId: string, publicationId: string) =>
+    (
+      await apiClient.get<LessonReportExport>(
+        `/teacher/classes/${classId}/lessons/${publicationId}/report-export`,
       )
     ).data,
   studentActivity: async (classId: string, studentId: string) =>
