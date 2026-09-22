@@ -7388,6 +7388,18 @@ button:disabled {
   padding-top: 1rem;
 }
 
+.report-export-action {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 1rem 0;
+}
+
+.report-export-action small {
+  color: var(--danger);
+  font-size: 0.7rem;
+}
+
 .report-manual-run {
   display: flex;
   flex-wrap: wrap;

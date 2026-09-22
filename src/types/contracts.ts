@@ -304,6 +304,24 @@ export interface TeacherProblemEvidence {
   }>;
 }
 
+export interface LessonReportExportStudent {
+  studentId: string;
+  studentName: string;
+  completionStatus: "completed" | "expired_partial" | "feedback_pending" | "not_started";
+  completedAt?: string | null;
+  problems: TeacherProblemEvidence[];
+  postMasteryFeedback?: string | null;
+  postMasteryScore?: number | null;
+  postMasteryMetrics?: PostMasteryMetricSet | null;
+}
+
+export interface LessonReportExport {
+  lessonTitle: string;
+  publicationId: string;
+  generatedAt: string;
+  students: LessonReportExportStudent[];
+}
+
 export interface ActivityEvent {
   id?: string;
   eventType?: string;
