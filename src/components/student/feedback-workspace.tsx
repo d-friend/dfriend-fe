@@ -39,6 +39,7 @@ export function FeedbackWorkspace({ lessonId }: { lessonId: string }) {
   const extrasQuery = useQuery({ queryKey: ["student", "extra", lessonId], queryFn: () => studentApi.extraExercises(lessonId), retry: 0, enabled: reportQuery.data?.lessonKind === "main" });
   const summary = reportQuery.data?.sessionSummary || cachedSummary || null;
   const masteryReport = summary?.post_mastery_report || null;
+  const isExpired = masteryReport?.completion_status === "expired_partial";
   const strengths = masteryReport?.strengths || [];
   const gaps = masteryReport?.gaps || [];
   const developing = masteryReport?.developing || [];
@@ -54,7 +55,7 @@ export function FeedbackWorkspace({ lessonId }: { lessonId: string }) {
   const average = typeof masteryReport?.score === "number" ? masteryReport.score : typeof reportQuery.data?.score === "number" ? normalizeScore(reportQuery.data.score) : null;
   const scoreTone = average === null ? "unknown" : average >= 8 ? "strong" : average >= 6 ? "steady" : "focus";
   const scoreCopy = average === null ? "Chưa đủ dữ liệu" : scoreTone === "strong" ? "Nắm khá chắc" : scoreTone === "steady" ? "Đang lên nhịp" : "Cần củng cố";
-  const lessonTitle = reportQuery.data?.lessonTitle || "Bài học vừa hoàn thành";
+  const lessonTitle = reportQuery.data?.lessonTitle || "Bài học vừa học";
   const hasExtra = !followUp && Boolean(extrasQuery.data?.extra_exercises?.some((group) => (group.problem_count || group.exercises.length) > 0));
   const nextFollowUpId = extrasQuery.data?.extra_exercises?.find((group) => (group.problem_count || group.exercises.length) > 0)?.publication_id;
   const nextStep = nextStepCopy(gaps, developing);
@@ -75,8 +76,8 @@ export function FeedbackWorkspace({ lessonId }: { lessonId: string }) {
         </div>
         <div className="feedback-hero-copy">
           <span>{lessonTitle}</span>
-          <h1 id="feedback-title">Feedback sau phiên học</h1>
-          <MathContent>{summary?.summary || "Bạn đã hoàn thành phiên học. Hãy xem lại phần cần luyện và thử giải thích mỗi bước bằng lời của mình."}</MathContent>
+          <h1 id="feedback-title">{isExpired ? "Phiên học đã hết giờ" : "Feedback sau phiên học"}</h1>
+          <MathContent>{summary?.summary || (isExpired ? "Phiên học đã đóng sau 60 phút. Bài chưa làm không được tính là điểm yếu." : "Bạn đã hoàn thành phiên học. Hãy xem lại phần cần luyện và thử giải thích mỗi bước bằng lời của mình.")}</MathContent>
         </div>
         <div className="feedback-progress-card">
           <span>Bài đã đi qua</span>
@@ -92,7 +93,7 @@ export function FeedbackWorkspace({ lessonId }: { lessonId: string }) {
             kind="strengths"
             icon={<Sparkle size={19} weight="fill" />}
             title="Điểm mạnh"
-            empty="Bạn đã kiên trì đi hết phiên học."
+            empty={isExpired ? "Chưa có đủ dữ liệu để xác định điểm mạnh." : "Bạn đã kiên trì đi hết phiên học."}
             items={strengths}
           />
           <FeedbackList
