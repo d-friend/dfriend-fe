@@ -11,7 +11,16 @@ const nextConfig: NextConfig = {
   },
   async rewrites() {
     const backend = process.env.BACKEND_API_URL || "http://localhost:3002";
+    const posthogIngestionHost = process.env.POSTHOG_INGEST_HOST
+      || process.env.NEXT_PUBLIC_POSTHOG_HOST
+      || "https://us.i.posthog.com";
     return [
+      // Keep PostHog traffic first-party so browser content blockers do not drop
+      // the study-session events before they reach the ingestion API.
+      {
+        source: "/dfr-collect/:path*",
+        destination: `${posthogIngestionHost}/:path*`,
+      },
       {
         source: "/api/:path*",
         destination: `${backend}/api/:path*`,

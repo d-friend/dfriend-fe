@@ -664,6 +664,9 @@ export interface StudyProblem {
 export interface StudySession {
   status: "success" | "not_found" | string;
   session_id?: string;
+  started_at?: string;
+  expires_at?: string;
+  server_now?: string;
   lesson_id?: string;
   problems?: StudyProblem[];
   current_problem_id?: number | null;
@@ -734,6 +737,7 @@ export interface PostMasteryCriterion {
 }
 
 export interface PostMasteryReport {
+  completion_status?: "completed" | "expired_partial";
   total_problem_count?: number;
   resolved_problem_count?: number;
   assessed_problem_count?: number;

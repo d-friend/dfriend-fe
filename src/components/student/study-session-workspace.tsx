@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
   ArrowRight,
@@ -27,6 +27,7 @@ import { deriveStudyProgress } from "@/lib/study-progress";
 import { buildMasteryGreeting, companionPolicy } from "@/lib/student-companion";
 import type { StudyProblem, StudySession } from "@/types/contracts";
 import { studentMathPreview } from "@/lib/math-markdown";
+import { beginStudyAttempt, captureStudyEvent, captureStudyEventOnce, identifyStudyStudent, type StudyEventProperties } from "@/lib/study-analytics";
 
 type ChatMessage = { id: string; role: "student" | "buddy"; content: string; degraded?: boolean };
 type SessionUiState = "initialising" | "idle" | "streaming" | "awaiting_reasoning" | "clarifying" | "farming" | "degraded" | "closing";
@@ -44,11 +45,13 @@ const ROLE_LABELS: Record<string, string> = {
 export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const meQuery = useQuery({ queryKey: studentKeys.me, queryFn: studentApi.me });
   const [lessonKind, setLessonKind] = useState<"main" | "remedial" | "advanced">("main");
   const [session, setSession] = useState<StudySession | null>(null);
   const [sessionError, setSessionError] = useState("");
   const [uiState, setUiState] = useState<SessionUiState>("initialising");
   const [lastCloseWasEarly, setLastCloseWasEarly] = useState(false);
+  const [clockNow, setClockNow] = useState<number | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [message, setMessage] = useState("");
   const [answer, setAnswer] = useState("");
@@ -61,6 +64,13 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
   const buddyMessageRef = useRef<HTMLTextAreaElement>(null);
   const scratchpadRef = useRef<HTMLTextAreaElement>(null);
   const answerInputRef = useRef<HTMLInputElement>(null);
+  const analyticsAttempt = useRef<StudyEventProperties | null>(null);
+  const analyticsTerminal = useRef(false);
+  const lastTrackedProblemCount = useRef(0);
+  const analyticsLeft = useRef(false);
+  const closeInFlight = useRef(false);
+  const autoClosedSessionId = useRef<string | null>(null);
+  const serverClockOffsetMs = useRef(0);
 
   const initialise = useCallback(async () => {
     setUiState("initialising");
@@ -78,6 +88,10 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
       const active = await studentApi.activeSession(lessonId, taxonomyVersion);
       const value = active.status === "not_found" ? await studentApi.startSession(lessonId, taxonomyVersion) : active;
       if (!value.session_id || !value.problems?.length) throw new Error("Session 2 chưa có bài tập để bắt đầu.");
+      if (!value.expires_at || !Number.isFinite(Date.parse(value.expires_at))) throw new Error("Session 2 chưa có thời hạn hợp lệ. Vui lòng thử lại sau.");
+      if (!value.server_now || !Number.isFinite(Date.parse(value.server_now))) throw new Error("Session 2 chưa đồng bộ được đồng hồ máy chủ.");
+      serverClockOffsetMs.current = Date.parse(value.server_now) - Date.now();
+      setClockNow(Date.now() + serverClockOffsetMs.current);
       const restored = readStoredStudyState(value.session_id);
       const pendingCandidate = restored?.pendingTurn ?? null;
       const validPending = pendingCandidate?.problemId === value.current_problem_id ? pendingCandidate : null;
@@ -96,6 +110,20 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
   }, [lessonId]);
 
   useEffect(() => { void initialise(); return () => streamController.current?.abort(); }, [initialise]);
+  useEffect(() => {
+    setClockNow(Date.now() + serverClockOffsetMs.current);
+    const timer = window.setInterval(() => setClockNow(Date.now() + serverClockOffsetMs.current), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  useEffect(() => {
+    if (!session?.session_id || !session.problems?.length || meQuery.data?.role !== "STUDENT") return;
+    if (analyticsAttempt.current?.session_id === session.session_id) return;
+    identifyStudyStudent(meQuery.data.id);
+    analyticsAttempt.current = beginStudyAttempt(meQuery.data.id, session.session_id, lessonId, lessonKind, session.problems.length, session.started_at);
+    lastTrackedProblemCount.current = session.completed_problem_count || 0;
+    analyticsTerminal.current = session.session_completed === true;
+    analyticsLeft.current = false;
+  }, [lessonId, lessonKind, meQuery.data?.id, meQuery.data?.role, session?.session_id, session?.started_at, session?.problems, session?.completed_problem_count, session?.session_completed]);
   useEffect(() => {
     if (!session?.session_id) return;
     sessionStorage.setItem(
@@ -120,6 +148,35 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
     : { stem: "", choices: [] };
   const answerChoices = displayedQuestion.choices.map((choice) => choice.label);
   const { completedCount, allComplete } = deriveStudyProgress(problems, session);
+  const remainingSeconds = session?.expires_at && clockNow !== null
+    ? Math.max(0, Math.ceil((Date.parse(session.expires_at) - clockNow) / 1000))
+    : null;
+  const timeExpired = remainingSeconds === 0;
+  const timerLabel = remainingSeconds === null ? "--:--" : `${String(Math.floor(remainingSeconds / 60)).padStart(2, "0")}:${String(remainingSeconds % 60).padStart(2, "0")}`;
+  useEffect(() => {
+    const attempt = analyticsAttempt.current;
+    if (!attempt || !session?.session_id || !allComplete) return;
+    analyticsTerminal.current = true;
+    captureStudyEventOnce("study_session_completed", {
+      ...attempt,
+      completed_problem_count: completedCount,
+    });
+  }, [allComplete, completedCount, meQuery.data?.id, session?.session_id]);
+  useEffect(() => {
+    if (!session?.session_id) return;
+    const sessionId = session.session_id;
+    const leave = () => {
+      const attempt = analyticsAttempt.current;
+      if (!attempt || attempt.session_id !== sessionId || analyticsTerminal.current || analyticsLeft.current) return;
+      analyticsLeft.current = true;
+      captureStudyEvent("study_session_left", { ...attempt, completed_problem_count: lastTrackedProblemCount.current });
+    };
+    window.addEventListener("pagehide", leave);
+    return () => {
+      window.removeEventListener("pagehide", leave);
+      leave();
+    };
+  }, [session?.session_id]);
   const currentProblemIndex = currentProblem
     ? problems.findIndex((item) => item.problem_id === currentProblem.problem_id)
     : -1;
@@ -129,7 +186,7 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
   const isViewingCurrentProblem = currentProblem?.problem_id === session?.current_problem_id;
 
   async function sendTurn(content: string, command: StudyTurnCommand, retryTurn?: PendingTurn) {
-    if (!session?.session_id || !currentProblem || !isViewingCurrentProblem || uiState === "streaming" || !content.trim()) return;
+    if (!session?.session_id || !currentProblem || !isViewingCurrentProblem || uiState === "streaming" || !content.trim() || (session.expires_at && Date.now() + serverClockOffsetMs.current >= Date.parse(session.expires_at))) return;
     const turn: PendingTurn = retryTurn || {
       commandId: globalThis.crypto?.randomUUID?.() || `turn-${Date.now()}`,
       content: content.trim(),
@@ -175,6 +232,13 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
       setUiState("degraded");
       return;
     }
+    if (typeof event.completed_problem_count === "number" && event.completed_problem_count > lastTrackedProblemCount.current) {
+      lastTrackedProblemCount.current = event.completed_problem_count;
+      if (analyticsAttempt.current) captureStudyEvent("study_session_progressed", {
+        ...analyticsAttempt.current,
+        completed_problem_count: event.completed_problem_count,
+      });
+    }
     setSession((current) => current ? {
       ...current,
       current_progress: event.current_progress ?? current.current_progress,
@@ -193,7 +257,7 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
     else setUiState("idle");
   }
 
-  const canSendChat = Boolean(message.trim()) && isViewingCurrentProblem && uiState !== "streaming" && uiState !== "closing";
+  const canSendChat = Boolean(message.trim()) && isViewingCurrentProblem && !timeExpired && uiState !== "streaming" && uiState !== "closing";
   const canSubmitReasoning = canSendChat && uiState === "awaiting_reasoning";
   const canSubmitScratchpad = Boolean(currentProblem && scratchpads[currentProblem.problem_id]?.trim()) && isViewingCurrentProblem && uiState === "awaiting_reasoning";
 
@@ -213,12 +277,15 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
   }
   function submitAnswer(event: FormEvent) { event.preventDefault(); if (!isViewingCurrentProblem) return; const value = answer; setAnswer(""); void sendTurn(value, "SUBMIT_ANSWER"); }
 
-  async function closeSession(finishEarly = false) {
-    if (!session?.session_id) return;
+  const closeSession = useCallback(async (finishEarly = false) => {
+    if (!session?.session_id || closeInFlight.current) return;
+    const expiredByClock = Boolean(session.expires_at && Date.now() + serverClockOffsetMs.current >= Date.parse(session.expires_at));
     if (finishEarly) {
       const confirmed = window.confirm("Kết thúc sớm phiên học? Bạn sẽ nhận feedback dựa trên phần đã làm. Các bài chưa làm sẽ không được tính là điểm yếu.");
       if (!confirmed) return;
     }
+    closeInFlight.current = true;
+    if (expiredByClock) streamController.current?.abort();
     setLastCloseWasEarly(finishEarly);
     setUiState("closing");
     try {
@@ -228,6 +295,20 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
       }
       const summary = await studentApi.closeSession(session.session_id, lessonId, sessionTaxonomyVersion, { finishEarly });
       if (summary.status === "error") throw new Error(summary.message || "Chưa thể kết thúc phiên học.");
+      if (finishEarly && analyticsAttempt.current) {
+        analyticsTerminal.current = true;
+        captureStudyEventOnce("study_session_ended_early", {
+          ...analyticsAttempt.current,
+          completed_problem_count: completedCount,
+        });
+      }
+      if (expiredByClock && !allComplete && analyticsAttempt.current) {
+        analyticsTerminal.current = true;
+        captureStudyEventOnce("study_session_expired", {
+          ...analyticsAttempt.current,
+          completed_problem_count: completedCount,
+        });
+      }
       sessionStorage.removeItem(`dfriend:study-session:${session.session_id}`);
       sessionStorage.setItem(`dfriend:feedback:${lessonId}`, JSON.stringify(summary));
       await queryClient.invalidateQueries({ queryKey: studentKeys.metrics });
@@ -236,8 +317,16 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
     } catch (error) {
       setSessionError(getApiErrorMessage(error, error instanceof Error ? error.message : "Chưa thể kết thúc phiên học."));
       setUiState("idle");
+    } finally {
+      closeInFlight.current = false;
     }
-  }
+  }, [session, lessonId, queryClient, router, allComplete, completedCount]);
+
+  useEffect(() => {
+    if (!session?.session_id || !timeExpired || autoClosedSessionId.current === session.session_id) return;
+    autoClosedSessionId.current = session.session_id;
+    void closeSession();
+  }, [closeSession, session?.session_id, timeExpired]);
 
   if (sessionError && !session) return <SessionStartError message={sessionError} retry={initialise} lessonId={lessonId} followUp={followUp} />;
 
@@ -247,6 +336,7 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
         <Link href={`/student/lesson/${lessonId}/part1`}><ArrowLeft size={19} /><span>Session 1</span></Link>
         <div className="study-header-center"><span><Mountains size={16} weight="fill" /> Đường lên đỉnh</span><MountainProgress problems={problems} completedCount={completedCount} currentProblemId={activeProblemId} waiting={uiState === "awaiting_reasoning" || uiState === "farming"} /></div>
         <div className="study-header-actions">
+          {session?.session_id ? <div className="learning-counter" role="timer" aria-label="Thời gian còn lại"><strong>{timerLabel}</strong><span>{timeExpired ? "Hết giờ" : "còn lại"}</span></div> : null}
           {!allComplete && session?.session_id ? <button type="button" className="study-early-finish" onClick={() => void closeSession(true)} disabled={uiState === "streaming" || uiState === "closing"}><Flag size={14} weight="fill" /><span>{uiState === "closing" ? "Đang tổng hợp" : "Kết thúc sớm"}</span></button> : null}
           <div className="learning-counter"><strong>{completedCount}/{problems.length || 4}</strong><span>bài</span></div>
         </div>

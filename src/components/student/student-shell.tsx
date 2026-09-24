@@ -16,6 +16,7 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useMemo, useState, type ReactNode } from "react";
 import { apiClient, getApiErrorMessage } from "@/lib/api-client";
 import { studentApi, studentKeys } from "@/lib/student-api";
+import { resetStudyAnalytics } from "@/lib/study-analytics";
 
 const navigation = [
   { label: "Hôm nay", shortLabel: "Hôm nay", href: "/student/dashboard", icon: House },
@@ -37,6 +38,7 @@ export function StudentShell({ children }: { children: ReactNode }) {
   const logout = useMutation({
     mutationFn: () => apiClient.post("/auth/logout"),
     onSuccess: () => {
+      resetStudyAnalytics();
       queryClient.clear();
       router.replace("/login");
       router.refresh();
