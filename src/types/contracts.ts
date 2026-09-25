@@ -537,7 +537,6 @@ export interface ExerciseDocument {
   indexStatus: "pending" | "indexing" | "ready" | "needs_manual" | "failed";
   extractionJobId?: string | null;
   ingestionMode?: "legacy" | "marker";
-  markerPilotAvailable?: boolean;
   extractionStatus?: "pending_dispatch" | "dispatching" | "queued" | "running" | "succeeded" | "partial" | "failed" | "budget_exhausted" | "cancelled" | null;
   processingStatus?: "not_started" | "pending" | "running" | "ready" | "partial" | "failed" | null;
   extractedPageCount?: number | null;
