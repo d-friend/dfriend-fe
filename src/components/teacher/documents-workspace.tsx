@@ -40,7 +40,7 @@ export function DocumentsWorkspace() {
   const curriculumQuery = useQuery({ queryKey: ["curriculum"], queryFn: teacherApi.curriculum, staleTime: 5 * 60 * 1000 });
   const catalogVersions = Array.from(new Set((curriculumQuery.data || []).map((item) => item.taxonomy_version)));
   const catalogVersion = catalogVersions.length === 1 ? catalogVersions[0] : undefined;
-  const documentsQuery = useQuery({ queryKey: ["teacher", "documents", catalogVersion], queryFn: () => teacherApi.documents(catalogVersion as number), enabled: Boolean(catalogVersion), refetchInterval: (query) => query.state.data?.some((item) => item.indexStatus === "pending" || item.indexStatus === "indexing") ? 5000 : false });
+  const documentsQuery = useQuery({ queryKey: ["teacher", "documents", catalogVersion], queryFn: () => teacherApi.documents(catalogVersion as number), enabled: Boolean(catalogVersion), refetchInterval: (query) => query.state.data?.some((item) => item.extractionJobId ? ["pending_dispatch", "dispatching", "queued", "running"].includes(item.extractionStatus || "") : item.indexStatus === "pending" || item.indexStatus === "indexing") ? 5000 : false });
 
   const topics = useMemo(() => curriculumQuery.data?.find((item) => item.value === subject)?.topics || [], [curriculumQuery.data, subject]);
   const concepts = useMemo(() => topics.find((item) => item.value === topic)?.concepts || [], [topics, topic]);
@@ -82,7 +82,10 @@ export function DocumentsWorkspace() {
     },
     onSuccess: async ({ uploaded, failed }) => {
       setFiles(failed.map((item) => item.file));
-      setSuccess(uploaded.length ? `Đã lưu ${uploaded.length} tài liệu vào kho.` : "");
+      const extracting = uploaded.filter((item) => "result" in item && item.result?.extractionJobId).length;
+      setSuccess(uploaded.length ? extracting
+        ? `Đã lưu ${uploaded.length} tài liệu. ${extracting} tài liệu đang chờ Marker trích xuất; số bài tập chưa được xác định.`
+        : `Đã lưu ${uploaded.length} tài liệu vào kho.` : "");
       setError(failed.length ? `${failed.length} tệp chưa tải được: ${failed.map((item) => `${item.file.name} (${item.error})`).join("; ")}` : "");
       if (!failed.length) {
         setTitle("");
@@ -107,6 +110,15 @@ export function DocumentsWorkspace() {
     mutationFn: (documentId: string) => teacherApi.retryDocumentIndex(documentId, catalogVersion as number),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["teacher", "documents"] }),
     onError: (retryError) => setError(getApiErrorMessage(retryError, "Không thể lập chỉ mục lại tài liệu.")),
+  });
+  const extractMarker = useMutation({
+    mutationFn: (documentId: string) => teacherApi.extractStoredDocumentWithMarker(documentId, catalogVersion as number),
+    onSuccess: async () => {
+      setError("");
+      setSuccess("Đã xếp tài liệu vào hàng đợi trích xuất Marker. Bạn có thể rời trang và quay lại xem trạng thái.");
+      await queryClient.invalidateQueries({ queryKey: ["teacher", "documents"] });
+    },
+    onError: (extractError) => setError(getApiErrorMessage(extractError, "Chưa thể trích xuất tài liệu bằng Marker.")),
   });
 
   function chooseFiles(nextFiles: File[]) {
@@ -163,6 +175,9 @@ export function DocumentsWorkspace() {
           {uploadOpen ? "Đóng" : "Tải tài liệu"}
         </button>
       </header>
+
+      {!uploadOpen && error && <p className="inline-error" role="alert">{error}</p>}
+      {!uploadOpen && success && <p className="success-message" role="status"><Check size={15} />{success}</p>}
 
       {uploadOpen && (
         <form className="upload-panel" onSubmit={submit}>
@@ -247,8 +262,15 @@ export function DocumentsWorkspace() {
               <div><h2>{document.title}</h2><p>{document.description || document.fileName || "Nguồn bài tập đã phân loại"}</p></div>
               <div className="taxonomy-path"><span>{document.subject}</span><span>{document.topic}</span><span>{document.concept || "Tài liệu chung"}</span></div>
               {document.indexStatus === "needs_manual" && <p className="document-index-help">{documentIndexHelp(document.indexSummary)}</p>}
+              {document.extractionJobId && document.extractionStatus === "failed" && <p className="document-index-help">Trích xuất thất bại. Tài liệu chưa sẵn sàng để dùng trong bài học.</p>}
+              {document.extractionJobId && document.extractionStatus === "budget_exhausted" && <p className="document-index-help">Đã chạm ngân sách trích xuất tháng này. Tài liệu đang chờ xử lý.</p>}
               {Boolean(document.indexSummary?.unreadable_objects) && <p className="document-index-help">Có {document.indexSummary?.unreadable_objects} công thức hoặc hình chưa đọc được. Vẫn có thể dùng cấu trúc nhận diện được để soạn bài mới; bài mới không phải bản trích nguyên.</p>}
-              <footer><span>{documentIndexLabel(document.indexStatus)} · {formatDate(document.createdAt)}</span><div>{document.previewUrl && <a className="icon-button" href={document.previewUrl} target="_blank" rel="noreferrer" aria-label="Xem tài liệu"><ArrowSquareOut size={16} /></a>}{(document.indexStatus === "failed" || document.indexStatus === "needs_manual") && <button className="icon-button" disabled={retryIndex.isPending} onClick={() => retryIndex.mutate(document.documentId)} aria-label="Lập chỉ mục lại"><ArrowsClockwise size={16} /></button>}<button className="icon-button" onClick={() => { if (window.confirm("Xóa tài liệu khỏi kho?")) remove.mutate(document.documentId); }} aria-label="Xóa tài liệu"><Trash size={16} /></button></div></footer>
+              {document.markerPilotAvailable && document.ingestionMode !== "marker" && !document.extractionJobId && (
+                <button type="button" className="document-marker-action" disabled={extractMarker.isPending} onClick={() => extractMarker.mutate(document.documentId)}>
+                  <ArrowsClockwise size={15} /> Trích xuất hình bằng Marker
+                </button>
+              )}
+              <footer><span>{document.ingestionMode === "marker" ? document.extractionJobId ? documentExtractionLabel(document.extractionStatus) : "Chưa xếp hàng trích xuất" : documentIndexLabel(document.indexStatus)} · {formatDate(document.createdAt)}</span><div>{document.previewUrl && <a className="icon-button" href={document.previewUrl} target="_blank" rel="noreferrer" aria-label="Xem tài liệu"><ArrowSquareOut size={16} /></a>}{document.ingestionMode !== "marker" && (document.indexStatus === "failed" || document.indexStatus === "needs_manual") && <button className="icon-button" disabled={retryIndex.isPending} onClick={() => retryIndex.mutate(document.documentId)} aria-label="Lập chỉ mục lại"><ArrowsClockwise size={16} /></button>}<button className="icon-button" onClick={() => { if (window.confirm("Xóa tài liệu khỏi kho?")) remove.mutate(document.documentId); }} aria-label="Xóa tài liệu"><Trash size={16} /></button></div></footer>
             </article>
           ))}
         </div>
@@ -286,6 +308,16 @@ function documentIndexLabel(status: string) {
   if (status === "needs_manual") return "Cần kiểm tra tài liệu";
   if (status === "failed") return "Chưa thể lập chỉ mục";
   return "Đang lập chỉ mục";
+}
+
+function documentExtractionLabel(status: string | null | undefined) {
+  if (status === "succeeded") return "Đã trích xuất · Chưa xử lý bài tập";
+  if (status === "partial") return "Trích xuất một phần · Cần kiểm tra";
+  if (status === "failed") return "Trích xuất thất bại";
+  if (status === "budget_exhausted") return "Đang chờ ngân sách";
+  if (status === "cancelled") return "Đã hủy trích xuất";
+  if (status === "running") return "Đang trích xuất";
+  return "Đang chờ trích xuất";
 }
 
 function documentIndexHelp(summary?: Record<string, number>) {

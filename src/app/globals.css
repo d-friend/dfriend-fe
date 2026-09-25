@@ -2739,7 +2739,21 @@ button:disabled {
 .problem-card .study-problem-statement { margin-top: 1.25rem; }
 .problem-card .markdown-body { font-size: clamp(0.95rem, 1.5vw, 1.08rem); line-height: 1.75; }
 .study-problem-image { display: grid; gap: 0.35rem; width: fit-content; max-width: 100%; margin-top: 1rem; color: var(--brand-strong); font-size: 0.7rem; font-weight: 650; text-decoration: none; }
+.draft-problem-assets { display: grid; gap: 0.75rem; margin: 0.8rem 0; min-width: 0; }
+.draft-problem-asset button { display: grid; gap: 0.35rem; max-width: 100%; padding: 0; border: 0; background: transparent; color: var(--brand-strong); font: inherit; font-size: 0.75rem; text-align: left; cursor: zoom-in; }
+.draft-problem-asset img { display: block; width: auto; max-width: 100%; max-height: 22rem; object-fit: contain; border: 1px solid var(--line); border-radius: 0.75rem; background: #fff; }
+.draft-asset-unavailable { color: #9a3412; font-size: 0.8rem; }
+.draft-asset-lightbox { position: fixed; z-index: 1000; inset: 0; display: grid; place-items: center; padding: 1rem; background: rgba(12, 20, 30, 0.88); }
+.draft-asset-lightbox img { max-width: min(100%, 72rem); max-height: calc(100dvh - 5rem); object-fit: contain; background: #fff; }
+.draft-asset-lightbox button { position: absolute; top: 1rem; right: 1rem; padding: 0.55rem 0.8rem; border: 1px solid #fff; border-radius: 0.5rem; background: #fff; cursor: pointer; }
 .study-problem-image img { display: block; width: auto; max-width: 100%; max-height: 22rem; border: 1px solid var(--line); border-radius: 0.75rem; background: #fff; object-fit: contain; }
+.study-problem-assets { display: grid; gap: 0.8rem; margin-top: 1rem; min-width: 0; }
+.study-problem-assets .study-problem-image { padding: 0; border: 0; background: none; text-align: left; cursor: zoom-in; }
+.study-problem-asset { min-width: 0; }
+.study-asset-unavailable { color: #9a3412; font-size: 0.8rem; line-height: 1.45; }
+.study-asset-lightbox { position: fixed; z-index: 1000; inset: 0; display: grid; place-items: center; padding: 1rem; background: rgba(12, 20, 30, 0.88); }
+.study-asset-lightbox img { display: block; max-width: min(100%, 72rem); max-height: calc(100dvh - 5rem); object-fit: contain; background: #fff; }
+.study-asset-lightbox button { position: absolute; top: 1rem; right: 1rem; padding: 0.55rem 0.8rem; border: 1px solid #fff; border-radius: 0.5rem; background: #fff; color: #111827; }
 .study-problem-choices { display: grid; gap: 0.45rem; margin: 0.75rem 0 0; padding: 0; list-style: none; }
 .study-problem-choices li { display: grid; grid-template-columns: 1.35rem minmax(0, 1fr); align-items: start; }
 .study-choice-label { color: var(--ink); font-weight: 700; line-height: 1.75; }
@@ -6221,6 +6235,20 @@ button:disabled {
   padding-top: 0.75rem;
   color: var(--subtle);
   font-size: 0.67rem;
+}
+
+.document-marker-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.75rem;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  background: var(--surface-muted);
+  color: var(--brand-strong);
+  font-size: 0.76rem;
+  font-weight: 650;
 }
 
 .document-card .icon-button {
