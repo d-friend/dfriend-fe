@@ -265,7 +265,7 @@ export function DocumentsWorkspace() {
               {document.extractionJobId && document.extractionStatus === "failed" && <p className="document-index-help">Trích xuất thất bại. Tài liệu chưa sẵn sàng để dùng trong bài học.</p>}
               {document.extractionJobId && document.extractionStatus === "budget_exhausted" && <p className="document-index-help">Đã chạm ngân sách trích xuất tháng này. Tài liệu đang chờ xử lý.</p>}
               {Boolean(document.indexSummary?.unreadable_objects) && <p className="document-index-help">Có {document.indexSummary?.unreadable_objects} công thức hoặc hình chưa đọc được. Vẫn có thể dùng cấu trúc nhận diện được để soạn bài mới; bài mới không phải bản trích nguyên.</p>}
-              {document.markerPilotAvailable && document.ingestionMode !== "marker" && !document.extractionJobId && (
+              {document.ingestionMode !== "marker" && !document.extractionJobId && (
                 <button type="button" className="document-marker-action" disabled={extractMarker.isPending} onClick={() => extractMarker.mutate(document.documentId)}>
                   <ArrowsClockwise size={15} /> Trích xuất hình bằng Marker
                 </button>
