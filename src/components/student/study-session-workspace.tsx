@@ -87,6 +87,8 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
   const closeInFlight = useRef(false);
   const autoClosedSessionId = useRef<string | null>(null);
   const serverClockOffsetMs = useRef(0);
+  const sessionTaxonomyVersion = useRef<number | null>(null);
+  const automaticImageRefreshes = useRef(new Set<string>());
 
   const initialise = useCallback(async () => {
     setUiState("initialising");
@@ -101,6 +103,7 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
       if (!Number.isInteger(taxonomyVersion) || taxonomyVersion < 1) {
         throw new Error("Bài học chưa có taxonomy version hợp lệ.");
       }
+      sessionTaxonomyVersion.current = taxonomyVersion;
       const active = await studentApi.activeSession(lessonId, taxonomyVersion);
       const value = active.status === "not_found" ? await studentApi.startSession(lessonId, taxonomyVersion) : active;
       if (!value.session_id || !value.problems?.length) throw new Error("Session 2 chưa có bài tập để bắt đầu.");
@@ -165,6 +168,7 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
   const requiredImagesReady = !invalidAssetContract && problemAssets
     .filter((asset) => asset.required_for_answer)
     .every((asset) => asset.target === "stem" && Boolean(safeStudyAssetUrl(asset.access_url))
+      && (!asset.expires_at || Date.parse(asset.expires_at) > Date.now() + 30_000)
       && decodedAssets[studyAssetKey(asset)] === true);
   const expandedAsset = problemAssets.find((asset) => studyAssetKey(asset) === expandedAssetKey);
   const displayedQuestion = currentProblem
@@ -208,6 +212,39 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
     ? ROLE_LABELS[currentProblem.recommended_problem_role] || "Bài luyện tập"
     : "Bài luyện tập";
   const isViewingCurrentProblem = currentProblem?.problem_id === session?.current_problem_id;
+
+  async function refreshProblemImages(problemId: number, failedAsset?: StudyProblemAsset) {
+    const currentSessionId = session?.session_id;
+    const taxonomyVersion = sessionTaxonomyVersion.current;
+    if (!currentSessionId || !taxonomyVersion) return;
+    const refreshKey = failedAsset
+      ? `${currentSessionId}:${failedAsset.asset_id}:${failedAsset.content_hash}` : null;
+    if (refreshKey) {
+      if (automaticImageRefreshes.current.has(refreshKey)) return;
+      automaticImageRefreshes.current.add(refreshKey);
+    }
+    try {
+      const fresh = await studentApi.activeSession(lessonId, taxonomyVersion);
+      if (fresh.session_id !== currentSessionId) return;
+      const freshProblem = fresh.problems?.find((item) => item.problem_id === problemId);
+      if (!freshProblem) return;
+      setSession((current) => {
+        if (current?.session_id !== currentSessionId) return current;
+        return { ...current, problems: current.problems?.map((problem) => {
+          if (problem.problem_id !== problemId) return problem;
+          return { ...problem, assets: problem.assets?.map((asset) => {
+            const replacement = freshProblem.assets?.find((candidate) =>
+              candidate.asset_id === asset.asset_id && candidate.content_hash === asset.content_hash &&
+              candidate.target === asset.target && candidate.target_id === asset.target_id);
+            return replacement ? { ...asset, access_url: replacement.access_url, expires_at: replacement.expires_at } : asset;
+          }) };
+        }) };
+      });
+      setSessionError("");
+    } catch (error) {
+      setSessionError(getApiErrorMessage(error, "Chưa tải lại được hình. Bạn có thể thử lại."));
+    }
+  }
 
   async function sendTurn(content: string, command: StudyTurnCommand, retryTurn?: PendingTurn) {
     if (!session?.session_id || !currentProblem || !isViewingCurrentProblem || uiState === "streaming" || !content.trim() || (session.expires_at && Date.now() + serverClockOffsetMs.current >= Date.parse(session.expires_at))) return;
@@ -393,13 +430,13 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
                             {url ? <button type="button" className="study-problem-image" onClick={() => setExpandedAssetKey(key)} aria-label="Mở hình lớn">
                               {/* Private signed URLs must load directly in the browser. */}
                               {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img src={url} width={asset.width} height={asset.height} alt={asset.alt_text || "Hình của đề bài"} onLoad={(event) => setDecodedAssets((current) => ({ ...current, [key]: event.currentTarget.naturalWidth > 0 && event.currentTarget.naturalHeight > 0 }))} onError={() => setDecodedAssets((current) => ({ ...current, [key]: false }))} />
+                              <img src={url} width={asset.width} height={asset.height} alt={asset.alt_text || "Hình của đề bài"} onLoad={(event) => setDecodedAssets((current) => ({ ...current, [key]: event.currentTarget.naturalWidth > 0 && event.currentTarget.naturalHeight > 0 }))} onError={() => { setDecodedAssets((current) => ({ ...current, [key]: false })); void refreshProblemImages(currentProblem.problem_id, asset); }} />
                               <span>Chạm để mở hình lớn</span>
                             </button> : <span className="study-asset-unavailable">Chưa tải được hình</span>}
                           </div>;
                         })}
                       {problemAssets.some((asset) => asset.target !== "stem" || asset.audience === "private_solution") ? <p className="study-asset-unavailable" role="alert">Bài có hình chưa được hỗ trợ ở vị trí này.</p> : null}
-                      {!requiredImagesReady ? <p className="study-asset-unavailable" role="alert">Chưa tải được hình cần cho bài này. Bạn có thể bỏ qua bài; câu trả lời sẽ không được chấm khi thiếu hình.</p> : null}
+                      {!requiredImagesReady ? <div className="study-asset-unavailable" role="alert">Chưa tải được hình cần cho bài này. Bạn có thể thử tải lại hoặc bỏ qua bài; câu trả lời sẽ không được chấm khi thiếu hình. <button type="button" onClick={() => void refreshProblemImages(currentProblem.problem_id)}>Tải lại hình</button></div> : null}
                     </div>
                   ) : currentProblem.attachment_url ? (
                     <a className="study-problem-image" href={currentProblem.attachment_url} target="_blank" rel="noreferrer">
