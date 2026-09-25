@@ -61,7 +61,12 @@ export async function waitForLessonGeneration(
     } catch (error) {
       if (isApiErrorStatus(error, 404) && Date.now() < registrationGraceAt) {
         onStage("Đang đưa yêu cầu vào hàng đợi");
-        await new Promise((resolve) => window.setTimeout(resolve, 500));
+        await new Promise((resolve) => window.setTimeout(resolve, 2_000));
+        continue;
+      }
+      if (isApiErrorStatus(error, 429)) {
+        onStage("Máy chủ đang giới hạn lượt kiểm tra. Bài vẫn đang được xử lý");
+        await new Promise((resolve) => window.setTimeout(resolve, 5_000));
         continue;
       }
       const transient = TRANSIENT_POLL_STATUSES.some((status) =>
@@ -122,7 +127,7 @@ export async function waitForLessonGeneration(
       error.name = "LessonGenerationFailed";
       throw error;
     }
-    await new Promise((resolve) => window.setTimeout(resolve, 1200));
+    await new Promise((resolve) => window.setTimeout(resolve, 3_000));
   }
   throw new Error("Tạo bài học mất nhiều thời gian hơn dự kiến. Tiến trình vẫn được lưu để tiếp tục sau.");
 }

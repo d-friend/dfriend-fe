@@ -25,7 +25,7 @@ import { studentApi, studentKeys } from "@/lib/student-api";
 import { streamStudyBuddy, type StudyStreamEvent, type StudyTurnCommand } from "@/lib/student-stream";
 import { deriveStudyProgress } from "@/lib/study-progress";
 import { buildMasteryGreeting, companionPolicy } from "@/lib/student-companion";
-import type { StudyProblem, StudySession } from "@/types/contracts";
+import type { StudyProblem, StudyProblemAsset, StudySession } from "@/types/contracts";
 import { studentMathPreview } from "@/lib/math-markdown";
 import { beginStudyAttempt, captureStudyEvent, captureStudyEventOnce, identifyStudyStudent, type StudyEventProperties } from "@/lib/study-analytics";
 
@@ -41,6 +41,20 @@ const ROLE_LABELS: Record<string, string> = {
   exploration: "The Break · Phá cách làm cũ",
   extension: "The Build · Áp dụng pattern mới",
 };
+
+function studyAssetKey(asset: StudyProblemAsset): string {
+  return `${asset.asset_id}:${asset.content_hash}:${asset.access_url || ""}`;
+}
+
+function safeStudyAssetUrl(value: string | null | undefined): string | null {
+  if (!value) return null;
+  if (value.startsWith("/") && !value.startsWith("//")) return value;
+  try {
+    const url = new URL(value);
+    if (url.protocol === "https:" || (url.protocol === "http:" && ["localhost", "127.0.0.1"].includes(url.hostname))) return value;
+  } catch { /* An invalid access URL is unavailable, not a renderable image. */ }
+  return null;
+}
 
 export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
   const router = useRouter();
@@ -58,6 +72,8 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
   const [scratchpads, setScratchpads] = useState<Record<number, string>>({});
   const [mobileTab, setMobileTab] = useState<"problem" | "buddy">("problem");
   const [activeProblemId, setActiveProblemId] = useState<number | null>(null);
+  const [decodedAssets, setDecodedAssets] = useState<Record<string, boolean>>({});
+  const [expandedAssetKey, setExpandedAssetKey] = useState<string | null>(null);
   const [pendingTurn, setPendingTurn] = useState<PendingTurn | null>(null);
   const streamController = useRef<AbortController | null>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
@@ -143,6 +159,14 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
   const activeCompanion = companionPolicy(session?.response_adaptation_policy);
   const followUp = lessonKind !== "main";
   const currentProblem = problems.find((item) => item.problem_id === activeProblemId) || problems[0];
+  const problemAssets = currentProblem?.assets || [];
+  const invalidAssetContract = problemAssets.some((asset) =>
+    asset.audience === "private_solution" || !["stem", "part", "choice"].includes(asset.target));
+  const requiredImagesReady = !invalidAssetContract && problemAssets
+    .filter((asset) => asset.required_for_answer)
+    .every((asset) => asset.target === "stem" && Boolean(safeStudyAssetUrl(asset.access_url))
+      && decodedAssets[studyAssetKey(asset)] === true);
+  const expandedAsset = problemAssets.find((asset) => studyAssetKey(asset) === expandedAssetKey);
   const displayedQuestion = currentProblem
     ? splitStudyQuestionChoices(currentProblem.question)
     : { stem: "", choices: [] };
@@ -187,6 +211,10 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
 
   async function sendTurn(content: string, command: StudyTurnCommand, retryTurn?: PendingTurn) {
     if (!session?.session_id || !currentProblem || !isViewingCurrentProblem || uiState === "streaming" || !content.trim() || (session.expires_at && Date.now() + serverClockOffsetMs.current >= Date.parse(session.expires_at))) return;
+    if (command !== "SKIP_PROBLEM" && !requiredImagesReady) {
+      setSessionError("Chưa tải được hình cần cho bài này. Hãy thử lại sau hoặc bỏ qua bài.");
+      return;
+    }
     const turn: PendingTurn = retryTurn || {
       commandId: globalThis.crypto?.randomUUID?.() || `turn-${Date.now()}`,
       content: content.trim(),
@@ -257,9 +285,9 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
     else setUiState("idle");
   }
 
-  const canSendChat = Boolean(message.trim()) && isViewingCurrentProblem && !timeExpired && uiState !== "streaming" && uiState !== "closing";
+  const canSendChat = Boolean(message.trim()) && isViewingCurrentProblem && requiredImagesReady && !timeExpired && uiState !== "streaming" && uiState !== "closing";
   const canSubmitReasoning = canSendChat && uiState === "awaiting_reasoning";
-  const canSubmitScratchpad = Boolean(currentProblem && scratchpads[currentProblem.problem_id]?.trim()) && isViewingCurrentProblem && uiState === "awaiting_reasoning";
+  const canSubmitScratchpad = Boolean(currentProblem && scratchpads[currentProblem.problem_id]?.trim()) && isViewingCurrentProblem && requiredImagesReady && uiState === "awaiting_reasoning";
 
   function submitChat(event?: FormEvent) { event?.preventDefault(); if (!canSendChat) return; const value = message; setMessage(""); void sendTurn(value, "CHAT"); }
   function submitReasoning() { if (!canSubmitReasoning) return; const value = message; setMessage(""); void sendTurn(value, "SUBMIT_REASONING"); }
@@ -275,7 +303,7 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
     event.preventDefault();
     submitChat();
   }
-  function submitAnswer(event: FormEvent) { event.preventDefault(); if (!isViewingCurrentProblem) return; const value = answer; setAnswer(""); void sendTurn(value, "SUBMIT_ANSWER"); }
+  function submitAnswer(event: FormEvent) { event.preventDefault(); if (!isViewingCurrentProblem || !requiredImagesReady) return; const value = answer; setAnswer(""); void sendTurn(value, "SUBMIT_ANSWER"); }
 
   const closeSession = useCallback(async (finishEarly = false) => {
     if (!session?.session_id || closeInFlight.current) return;
@@ -355,7 +383,25 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
                 </header>
                 <div className="study-problem-statement">
                   <MathContent>{displayedQuestion.stem}</MathContent>
-                  {currentProblem.attachment_url ? (
+                  {problemAssets.length ? (
+                    <div className="study-problem-assets" aria-label="Hình của bài tập">
+                      {problemAssets.filter((asset) => asset.target === "stem" && asset.audience !== "private_solution")
+                        .sort((a, b) => a.order - b.order).map((asset) => {
+                          const key = studyAssetKey(asset);
+                          const url = safeStudyAssetUrl(asset.access_url);
+                          return <div className="study-problem-asset" key={key}>
+                            {url ? <button type="button" className="study-problem-image" onClick={() => setExpandedAssetKey(key)} aria-label="Mở hình lớn">
+                              {/* Private signed URLs must load directly in the browser. */}
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img src={url} width={asset.width} height={asset.height} alt={asset.alt_text || "Hình của đề bài"} onLoad={(event) => setDecodedAssets((current) => ({ ...current, [key]: event.currentTarget.naturalWidth > 0 && event.currentTarget.naturalHeight > 0 }))} onError={() => setDecodedAssets((current) => ({ ...current, [key]: false }))} />
+                              <span>Chạm để mở hình lớn</span>
+                            </button> : <span className="study-asset-unavailable">Chưa tải được hình</span>}
+                          </div>;
+                        })}
+                      {problemAssets.some((asset) => asset.target !== "stem" || asset.audience === "private_solution") ? <p className="study-asset-unavailable" role="alert">Bài có hình chưa được hỗ trợ ở vị trí này.</p> : null}
+                      {!requiredImagesReady ? <p className="study-asset-unavailable" role="alert">Chưa tải được hình cần cho bài này. Bạn có thể bỏ qua bài; câu trả lời sẽ không được chấm khi thiếu hình.</p> : null}
+                    </div>
+                  ) : currentProblem.attachment_url ? (
                     <a className="study-problem-image" href={currentProblem.attachment_url} target="_blank" rel="noreferrer">
                       {/* Keep private/presigned problem images out of an image optimization proxy. */}
                       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -375,9 +421,17 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
                   ) : null}
                 </div>
               </article>
+              {expandedAsset && safeStudyAssetUrl(expandedAsset.access_url) ? (
+                <div className="study-asset-lightbox" role="dialog" aria-modal="true" aria-label="Hình lớn của bài tập" onClick={() => setExpandedAssetKey(null)}>
+                  <button type="button" onClick={() => setExpandedAssetKey(null)}>Đóng hình</button>
+                  {/* Private signed URLs must load directly in the browser. */}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={safeStudyAssetUrl(expandedAsset.access_url)!} alt={expandedAsset.alt_text || "Hình lớn của đề bài"} onClick={(event) => event.stopPropagation()} />
+                </div>
+              ) : null}
               <div className="scratchpad"><label htmlFor="scratchpad"><PencilSimpleLine size={18} /> Nháp của bạn</label><textarea ref={scratchpadRef} id="scratchpad" value={scratchpads[currentProblem.problem_id] || ""} onChange={(event) => setScratchpads((current) => ({ ...current, [currentProblem.problem_id]: event.target.value }))} placeholder="Ghi các bước, thử phép tính hoặc viết điều bạn đang nghĩ..." /><MathInputAssist inputRef={scratchpadRef} value={scratchpads[currentProblem.problem_id] || ""} onChange={(value) => setScratchpads((current) => ({ ...current, [currentProblem.problem_id]: value }))} />{uiState === "awaiting_reasoning" && isViewingCurrentProblem ? <button type="button" className="scratchpad-submit" onClick={submitScratchpadReasoning} disabled={!canSubmitScratchpad}>Nộp phần nháp này làm giải thích</button> : null}</div>
             </div>
-            <form className="answer-composer" onSubmit={submitAnswer}>{!isViewingCurrentProblem ? <div className="study-readonly-notice"><span>Bạn đang xem lại bài cũ.</span><button type="button" onClick={() => setActiveProblemId(session.current_problem_id ?? problems[0]?.problem_id)}>Quay lại bài đang làm</button></div> : null}<label htmlFor="problem-answer"><strong>Đáp án cuối cùng</strong><span>{answerChoices.length ? "Chọn một phương án bên dưới." : "Nhập bằng bàn phím hoặc dùng phím toán nhanh."}</span></label>{answerChoices.length ? <div className="answer-choice-shortcuts" role="group" aria-label="Chọn đáp án">{answerChoices.map((choice) => <button key={choice} type="button" data-selected={answer === choice} onClick={() => setAnswer(choice)} disabled={!isViewingCurrentProblem || uiState === "streaming" || allComplete}>{choice}</button>)}</div> : <MathInputAssist inputRef={answerInputRef} value={answer} onChange={setAnswer} compact />}<div><input ref={answerInputRef} id="problem-answer" value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder={answerChoices.length ? "Hoặc nhập A, B, C, D" : "Ví dụ: 5x^2 hoặc 3/4"} autoCapitalize="characters" spellCheck={false} disabled={!isViewingCurrentProblem || uiState === "streaming" || allComplete} /><button className="student-primary-button" disabled={!isViewingCurrentProblem || !answer.trim() || uiState === "streaming" || allComplete}>Kiểm tra <ArrowRight size={16} /></button></div>{isViewingCurrentProblem && !allComplete ? <button type="button" className="study-skip-problem" onClick={skipProblem} disabled={uiState === "streaming" || uiState === "closing"}>Bỏ qua bài này</button> : null}</form>
+            <form className="answer-composer" onSubmit={submitAnswer}>{!isViewingCurrentProblem ? <div className="study-readonly-notice"><span>Bạn đang xem lại bài cũ.</span><button type="button" onClick={() => setActiveProblemId(session.current_problem_id ?? problems[0]?.problem_id)}>Quay lại bài đang làm</button></div> : null}<label htmlFor="problem-answer"><strong>Đáp án cuối cùng</strong><span>{answerChoices.length ? "Chọn một phương án bên dưới." : "Nhập bằng bàn phím hoặc dùng phím toán nhanh."}</span></label>{answerChoices.length ? <div className="answer-choice-shortcuts" role="group" aria-label="Chọn đáp án">{answerChoices.map((choice) => <button key={choice} type="button" data-selected={answer === choice} onClick={() => setAnswer(choice)} disabled={!isViewingCurrentProblem || !requiredImagesReady || uiState === "streaming" || allComplete}>{choice}</button>)}</div> : <MathInputAssist inputRef={answerInputRef} value={answer} onChange={setAnswer} compact />}<div><input ref={answerInputRef} id="problem-answer" value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder={answerChoices.length ? "Hoặc nhập A, B, C, D" : "Ví dụ: 5x^2 hoặc 3/4"} autoCapitalize="characters" spellCheck={false} disabled={!isViewingCurrentProblem || !requiredImagesReady || uiState === "streaming" || allComplete} /><button className="student-primary-button" disabled={!isViewingCurrentProblem || !requiredImagesReady || !answer.trim() || uiState === "streaming" || allComplete}>Kiểm tra <ArrowRight size={16} /></button></div>{isViewingCurrentProblem && !allComplete ? <button type="button" className="study-skip-problem" onClick={skipProblem} disabled={uiState === "streaming" || uiState === "closing"}>Bỏ qua bài này</button> : null}</form>
           </section>
 
           <section className="buddy-pane" data-mobile-active={mobileTab === "buddy"}>

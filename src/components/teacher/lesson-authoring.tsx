@@ -25,12 +25,28 @@ export interface ProblemView {
   role?: string;
   skill?: string;
   choices?: string[];
+  choiceIds?: string[];
+  assets?: TeacherProblemAsset[];
   answer?: string;
   solution?: string;
   source?: Record<string, unknown>;
   origin?: string;
   sourceMode?: string;
   qualityContractVersion?: number;
+}
+
+interface TeacherProblemAsset {
+  asset_id: string;
+  content_hash: string;
+  target: "stem" | "part" | "choice" | "solution";
+  target_id?: string | null;
+  order: number;
+  audience: "public_problem" | "private_solution";
+  width: number;
+  height: number;
+  mime_type: "image/png" | "image/jpeg" | "image/webp";
+  alt_text?: string | null;
+  access_url?: string | null;
 }
 
 export interface KnowledgeSectionView {
@@ -271,6 +287,9 @@ export function LessonAuthoring() {
         upload.append("shared", "true");
         const registered = await teacherApi.uploadDocument(upload);
         setFile(null);
+        if (registered.extractionJobId) {
+          throw new Error("Tài liệu đã được lưu để Marker trích xuất. Chức năng tạo bài từ tài liệu Marker chưa sẵn sàng; hãy kiểm tra trạng thái trong Kho tài liệu.");
+        }
         await waitForDocumentIndex(registered.documentId, taxonomyVersion);
       }
       const result = await teacherApi.precheckLesson({ title: title.trim(), lessonGoal: lessonGoal.trim(), subject, topic, concept, taxonomyVersion, explicitSkillIds: selectedSkills });
@@ -538,6 +557,7 @@ export function DraftProblemList({
   onGuidanceChange: (id: string, field: keyof RegenerationGuidance, value: string) => void;
   readOnly?: boolean;
 }) {
+  const [expandedAsset, setExpandedAsset] = useState<TeacherProblemAsset | null>(null);
   if (!problems.length) return <div className="list-empty"><Lightbulb size={26} /><h3>Chưa tìm thấy danh sách bài</h3><p>Bản nháp có thể cần được tạo lại.</p></div>;
   return <div className="draft-problem-list">{problems.map((problem, index) => {
     const needsReplacement = rejected.has(problem.id);
@@ -545,16 +565,51 @@ export function DraftProblemList({
     return <article key={problem.id} data-rejected={needsReplacement}>
       <header><span>{String(index + 1).padStart(2, "0")}</span><div><strong>{problem.role ? masteryRoleLabels[problem.role] || problem.role : "Bài luyện tập"}</strong><small>{problem.skill || "Theo mục tiêu bài học"}</small>{problemSourceLabel(problem) && <small className="problem-origin">{problemSourceLabel(problem)}</small>}</div>{!readOnly && <button className={needsReplacement ? "secondary-button" : "text-button"} onClick={() => onToggle(problem.id)}>{needsReplacement ? "Giữ lại" : "Cần thay"}</button>}</header>
       <MathContent>{problem.prompt}</MathContent>
-      {problem.choices?.length ? <ol type="A">{problem.choices.map((choice, choiceIndex) => <li key={`${problem.id}:${choiceIndex}`}><MathContent answer>{choice}</MathContent></li>)}</ol> : null}
+      <TeacherAssetList assets={(problem.assets || []).filter((asset) => asset.audience === "public_problem" && asset.target === "stem")} onExpand={setExpandedAsset} />
+      {problem.choices?.length ? <ol type="A">{problem.choices.map((choice, choiceIndex) => <li key={`${problem.id}:${choiceIndex}`}><MathContent answer>{choice}</MathContent><TeacherAssetList assets={(problem.assets || []).filter((asset) => asset.audience === "public_problem" && asset.target === "choice" && asset.target_id === problem.choiceIds?.[choiceIndex])} onExpand={setExpandedAsset} /></li>)}</ol> : null}
+      {(problem.assets || []).some((asset) => asset.target === "choice" && !problem.choiceIds?.includes(asset.target_id || "")) ? <p className="draft-asset-unavailable">Hình của lựa chọn chưa khớp với đáp án hiển thị; bài này cần kiểm tra trước khi xuất bản.</p> : null}
+      {(problem.assets || []).some((asset) => asset.target === "part") ? <p className="draft-asset-unavailable">Hình gắn với ý nhỏ chưa có vị trí hiển thị trong bản nháp này.</p> : null}
       {problem.answer ? <div className="draft-answer"><span>Đáp án</span><MathContent answer>{problem.answer}</MathContent></div> : null}
-      {problem.solution ? <details className="draft-solution"><summary>Xem lời giải Copilot sẽ dùng</summary><MathContent>{problem.solution}</MathContent></details> : null}
+      {problem.solution || (problem.assets || []).some((asset) => asset.audience === "private_solution") ? <details className="draft-solution"><summary>Xem lời giải Copilot sẽ dùng</summary>{problem.solution ? <MathContent>{problem.solution}</MathContent> : null}<TeacherAssetList assets={(problem.assets || []).filter((asset) => asset.audience === "private_solution" && asset.target === "solution")} onExpand={setExpandedAsset} /></details> : null}
       {needsReplacement ? <div className="regeneration-guidance">
         <p>Gợi ý riêng cho câu thay thế</p>
         <label><span>Vì sao cần thay? <small>Không bắt buộc</small></span><textarea value={itemGuidance.reason} onChange={(event) => onGuidanceChange(problem.id, "reason", event.target.value)} maxLength={1000} rows={2} placeholder="Ví dụ: câu hỏi quá giống ví dụ đã học." /></label>
         <label><span>Muốn thay đổi như thế nào? <small>Không bắt buộc</small></span><textarea value={itemGuidance.requestedChange} onChange={(event) => onGuidanceChange(problem.id, "requestedChange", event.target.value)} maxLength={1000} rows={2} placeholder="Ví dụ: đổi ngữ cảnh, giữ nguyên kỹ năng và độ khó." /></label>
       </div> : null}
     </article>;
+  })}{expandedAsset && safeTeacherAssetUrl(expandedAsset.access_url) ? (
+    <div className="draft-asset-lightbox" role="dialog" aria-label="Hình bài tập phóng to" onClick={() => setExpandedAsset(null)}>
+      <button type="button" onClick={() => setExpandedAsset(null)}>Đóng hình</button>
+      {/* Private signed URLs must load directly without a Next image proxy. */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={safeTeacherAssetUrl(expandedAsset.access_url)!} alt={expandedAsset.alt_text || "Hình bài tập"} />
+    </div>
+  ) : null}</div>;
+}
+
+function TeacherAssetList({ assets, onExpand }: { assets: TeacherProblemAsset[]; onExpand: (asset: TeacherProblemAsset) => void }) {
+  if (!assets.length) return null;
+  return <div className="draft-problem-assets" aria-label="Hình của bài tập">{[...assets].sort((a, b) => a.order - b.order).map((asset) => {
+    const url = safeTeacherAssetUrl(asset.access_url);
+    return <div key={`${asset.asset_id}:${asset.content_hash}`} className="draft-problem-asset">{url ? (
+      <button type="button" onClick={() => onExpand(asset)} aria-label="Mở hình lớn">
+        {/* Private signed URLs must load directly without a Next image proxy. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={url} width={asset.width} height={asset.height} alt={asset.alt_text || "Hình của bài tập"} />
+        <span>Phóng to hình</span>
+      </button>
+    ) : <span className="draft-asset-unavailable">Chưa tải được hình của bài này.</span>}</div>;
   })}</div>;
+}
+
+function safeTeacherAssetUrl(value: string | null | undefined): string | null {
+  if (!value) return null;
+  if (value.startsWith("/") && !value.startsWith("//")) return value;
+  try {
+    const url = new URL(value);
+    if (url.protocol === "https:" || (url.protocol === "http:" && ["localhost", "127.0.0.1"].includes(url.hostname))) return value;
+  } catch { /* Invalid URLs are unavailable. */ }
+  return null;
 }
 
 export function DraftReviewContent({ review, rejected, guidance, onToggle, onGuidanceChange, readOnly = false }: { review: DraftReviewModel; rejected: Set<string>; guidance: RegenerationGuidanceByProblem; onToggle: (id: string) => void; onGuidanceChange: (id: string, field: keyof RegenerationGuidance, value: string) => void; readOnly?: boolean }) {
@@ -596,6 +651,8 @@ export function normalizeProblems(value: unknown, namespace = "problem"): Proble
       role: stringOrUndefined(item.role || item.recommended_problem_role || item.problem_role || item.type),
       skill: stringOrUndefined(item.primary_skill_id || item.skill_name || item.skill_id || item.skill_code),
       choices: rawChoices?.map(normalizeChoice),
+      choiceIds: rawChoices?.map((choice, choiceIndex) => String(asRecord(choice)?.choice_id || asRecord(choice)?.id || choiceIndex)),
+      assets: normalizeTeacherAssets(item.assets),
       answer: displayStringOrUndefined(item.answer ?? item.final_answer ?? item.correctAnswer ?? item.correct_answer),
       solution: stringOrUndefined(item.solution || item.explanation || item.solution_text),
       source: item,
@@ -603,6 +660,40 @@ export function normalizeProblems(value: unknown, namespace = "problem"): Proble
       sourceMode: stringOrUndefined(asRecord(item.metadata)?.source_task_mode || asRecord(item.metadata)?.source_mode),
       qualityContractVersion: typeof item.quality_contract_version === "number" ? item.quality_contract_version : undefined,
     };
+  });
+}
+
+function normalizeTeacherAssets(value: unknown): TeacherProblemAsset[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(isRecord).flatMap((asset) => {
+    const target = asset.target;
+    const audience = asset.audience;
+    const mime = asset.mime_type;
+    if (typeof asset.asset_id !== "string" || !asset.asset_id ||
+        typeof asset.content_hash !== "string" || !/^[0-9a-f]{64}$/.test(asset.content_hash) ||
+        !["stem", "part", "choice", "solution"].includes(String(target)) ||
+        !["public_problem", "private_solution"].includes(String(audience)) ||
+        !["image/png", "image/jpeg", "image/webp"].includes(String(mime)) ||
+        !Number.isInteger(asset.order) || Number(asset.order) < 0 ||
+        !Number.isInteger(asset.width) || Number(asset.width) <= 0 ||
+        !Number.isInteger(asset.height) || Number(asset.height) <= 0 ||
+        ((target === "part" || target === "choice") && (typeof asset.target_id !== "string" || !asset.target_id)) ||
+        ((target === "stem" || target === "solution") && asset.target_id != null) ||
+        (target === "solution" && audience !== "private_solution") ||
+        (audience === "private_solution" && target !== "solution")) return [];
+    return [{
+      asset_id: asset.asset_id,
+      content_hash: asset.content_hash,
+      target: target as TeacherProblemAsset["target"],
+      target_id: typeof asset.target_id === "string" ? asset.target_id : null,
+      order: Number(asset.order),
+      audience: audience as TeacherProblemAsset["audience"],
+      width: Number(asset.width),
+      height: Number(asset.height),
+      mime_type: mime as TeacherProblemAsset["mime_type"],
+      alt_text: typeof asset.alt_text === "string" ? asset.alt_text : null,
+      access_url: typeof asset.access_url === "string" ? asset.access_url : null,
+    }];
   });
 }
 

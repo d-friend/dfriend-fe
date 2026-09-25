@@ -535,6 +535,12 @@ export interface ExerciseDocument {
   concept: string | null;
   scopeKind: "concept" | "general_topic";
   indexStatus: "pending" | "indexing" | "ready" | "needs_manual" | "failed";
+  extractionJobId?: string | null;
+  ingestionMode?: "legacy" | "marker";
+  markerPilotAvailable?: boolean;
+  extractionStatus?: "pending_dispatch" | "dispatching" | "queued" | "running" | "succeeded" | "partial" | "failed" | "budget_exhausted" | "cancelled" | null;
+  processingStatus?: "not_started" | "pending" | "running" | "ready" | "partial" | "failed" | null;
+  extractedPageCount?: number | null;
   indexSummary?: Record<string, number>;
   indexError?: string | null;
   shared: boolean;
@@ -658,7 +664,25 @@ export interface StudyProblem {
   problem_id: number;
   question: string;
   attachment_url?: string;
+  assets?: StudyProblemAsset[];
   recommended_problem_role?: string;
+}
+
+export interface StudyProblemAsset {
+  asset_id: string;
+  content_hash: string;
+  target: "stem" | "part" | "choice";
+  target_id?: string | null;
+  order: number;
+  width: number;
+  height: number;
+  mime_type: "image/png" | "image/jpeg" | "image/webp";
+  alt_text?: string | null;
+  required_for_answer: boolean;
+  access_url?: string | null;
+  expires_at?: string | null;
+  /** A private value here is a server contract failure and must never render. */
+  audience?: "public_problem" | "private_solution";
 }
 
 export interface StudySession {

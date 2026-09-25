@@ -551,6 +551,7 @@ function blockerLabel(item: Record<string, unknown>) {
   if (code === "draft_not_approved") return "Cần duyệt toàn bộ bản nháp trước khi xuất bản.";
   if (code === "unapproved_ai_problems") return "Còn bài AI soạn chưa được duyệt.";
   if (code === "session_coverage_not_guaranteed") return "Chưa bảo đảm mỗi học sinh được đánh giá đủ các kỹ năng đã chọn.";
+  if (code === "visual_asset_delivery_unavailable") return "Bài có hình chưa có đường tải ảnh an toàn cho học sinh; chưa thể xuất bản.";
   return String(item.message || item.detail || code || "Cần chỉnh sửa bản nháp.");
 }
 

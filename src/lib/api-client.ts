@@ -385,7 +385,7 @@ export const teacherApi = {
     ).data.documents,
   uploadDocument: async (body: FormData) =>
     (
-      await apiClient.post<{ message: string; documentId: string; previewUrl: string; indexStatus: string }>(
+      await apiClient.post<{ message: string; documentId: string; previewUrl: string; indexStatus: string; extractionJobId?: string | null; extractionStatus?: string | null }>(
         "/exercises/upload",
         body,
         { timeout: 120_000 },
@@ -395,6 +395,8 @@ export const teacherApi = {
     apiClient.delete(`/exercises/documents/${documentId}`, { params: { taxonomyVersion } }),
   retryDocumentIndex: async (documentId: string, taxonomyVersion: number) =>
     (await apiClient.post<{ documentId: string; indexStatus: string }>(`/exercises/documents/${documentId}/retry-index`, undefined, { params: { taxonomyVersion } })).data,
+  extractStoredDocumentWithMarker: async (documentId: string, taxonomyVersion: number) =>
+    (await apiClient.post<{ documentId: string; extractionJobId: string; extractionStatus: string }>(`/exercises/documents/${documentId}/extract-marker`, undefined, { params: { taxonomyVersion } })).data,
   precheckLesson: async (payload: {
     lessonGoal?: string;
     title: string;
