@@ -19,6 +19,7 @@ export function LessonGenerationJobWorkspace({ jobId }: { jobId: string }) {
   const [detail, setDetail] = useState("Đang kiểm tra tiến trình tạo bài");
   const [partial, setPartial] = useState<LessonGenerationResult | null>(null);
   const [error, setError] = useState("");
+  const [retryableFailure, setRetryableFailure] = useState(false);
   const [activeJobId, setActiveJobId] = useState(jobId);
   const [retryNonce, setRetryNonce] = useState(0);
   const enqueueError = search.get("enqueueError") || "";
@@ -63,9 +64,12 @@ export function LessonGenerationJobWorkspace({ jobId }: { jobId: string }) {
       })
       .catch((generationError) => {
         if (!cancelled) {
-          if (generationError instanceof Error && generationError.name === "LessonGenerationFailed") {
+          const missingCheckpoint = generationError instanceof Error &&
+            (generationError as Error & { code?: string }).code === "GENERATION_REQUEST_MISMATCH";
+          if (generationError instanceof Error && generationError.name === "LessonGenerationFailed" && !missingCheckpoint) {
             replaceStoredLessonGenerationJob(activeJobId);
           }
+          setRetryableFailure(missingCheckpoint);
           setError(getApiErrorMessage(generationError, generationError instanceof Error ? generationError.message : "Không thể tạo bài học."));
         }
       });
@@ -76,8 +80,9 @@ export function LessonGenerationJobWorkspace({ jobId }: { jobId: string }) {
 
   async function retryMissing() {
     setError("");
+    setRetryableFailure(false);
     setPartial(null);
-    setDetail("Đang tạo đúng các slot còn thiếu");
+    setDetail(partial?.knowledge ? "Đang tạo các slot còn thiếu" : "Đang tạo lại phần kiến thức và các slot còn thiếu");
     try {
       const queued = await teacherApi.retryMissingLessonSlots(activeJobId);
       replaceStoredLessonGenerationJob(activeJobId, queued.jobId);
@@ -87,6 +92,7 @@ export function LessonGenerationJobWorkspace({ jobId }: { jobId: string }) {
         `/teacher/lessons/generating/${encodeURIComponent(queued.jobId)}${params.size ? `?${params.toString()}` : ""}`,
       );
     } catch (retryError) {
+      setRetryableFailure(true);
       setError(getApiErrorMessage(retryError, "Chưa thể tạo tiếp các slot còn thiếu."));
     }
   }
@@ -95,16 +101,17 @@ export function LessonGenerationJobWorkspace({ jobId }: { jobId: string }) {
     const partialLessonId = String(partial.lessonId || "");
     const partialTaxonomyVersion = Number(partial.taxonomyVersion);
     const masteryRetryExhausted = partial.masteryRetryExhausted === true;
+    const hasKnowledge = !!partial.knowledge;
     return (
       <section className="lesson-generation-screen">
         <div className="lesson-generation-panel">
           <WarningCircle size={34} />
-          <p className="workspace-kicker">{masteryRetryExhausted ? "Phần kiến thức đã được giữ" : "Bản nháp đã được giữ"}</p>
-          <h1>{masteryRetryExhausted ? "Chưa tạo được arc bài tập hoàn chỉnh" : "Còn slot chưa đạt chuẩn"}</h1>
+          <p className="workspace-kicker">{hasKnowledge && masteryRetryExhausted ? "Phần kiến thức đã được giữ" : "Bản nháp đã được giữ"}</p>
+          <h1>{!hasKnowledge ? "Chưa tạo được phần kiến thức" : masteryRetryExhausted ? "Chưa tạo được arc bài tập hoàn chỉnh" : "Còn slot chưa đạt chuẩn"}</h1>
           <p className="lesson-generation-lead">
-            {masteryRetryExhausted ? "D-Friend đã thử lại phần bài tập 2 lần. " : ""}
+            {hasKnowledge && masteryRetryExhausted ? "D-Friend đã thử lại phần bài tập 2 lần. " : ""}
             Đã hoàn thành {partial.generationCompletedSlots || 0}
-            {typeof partial.generationTotalSlots === "number" ? `/${partial.generationTotalSlots}` : ""} slot nhưng chưa có arc 4/4. Thử lại sẽ giữ nguyên kiến thức và chỉ tạo các slot còn thiếu.
+            {typeof partial.generationTotalSlots === "number" ? `/${partial.generationTotalSlots}` : ""} slot nhưng chưa có arc 4/4. {hasKnowledge ? "Thử lại sẽ giữ nguyên kiến thức và chỉ tạo các slot còn thiếu." : "Thử lại sẽ tạo phần kiến thức rồi tiếp tục các slot còn thiếu."}
           </p>
           <div className="lesson-generation-actions">
             <button
@@ -117,7 +124,7 @@ export function LessonGenerationJobWorkspace({ jobId }: { jobId: string }) {
             </button>
             {partial.retryAllowed !== false && (
               <button className="primary-button" type="button" onClick={retryMissing}>
-                {masteryRetryExhausted ? "Thử tạo lại bài tập" : "Tạo tiếp phần còn thiếu"}
+                {!hasKnowledge ? "Thử tạo lại kiến thức" : masteryRetryExhausted ? "Thử tạo lại bài tập" : "Tạo tiếp phần còn thiếu"}
               </button>
             )}
           </div>
@@ -136,6 +143,7 @@ export function LessonGenerationJobWorkspace({ jobId }: { jobId: string }) {
           <button className="secondary-button" onClick={() => enqueueError ? router.back() : setRetryNonce((value) => value + 1)}>
             {enqueueError ? "Quay lại planning" : "Kiểm tra lại"}
           </button>
+          {retryableFailure && <button className="primary-button" onClick={() => void retryMissing()}>Tạo lại bản nháp</button>}
         </div>
       </section>
     );
