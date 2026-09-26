@@ -125,6 +125,9 @@ export async function waitForLessonGeneration(
       const jobError = isRecord(job.error) ? job.error.message : job.error;
       const error = new Error(String(jobError || "Không thể tạo bài học."));
       error.name = "LessonGenerationFailed";
+      if (isRecord(job.error) && typeof job.error.code === "string") {
+        Object.assign(error, { code: job.error.code });
+      }
       throw error;
     }
     await new Promise((resolve) => window.setTimeout(resolve, 3_000));

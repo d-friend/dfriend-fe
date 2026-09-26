@@ -367,7 +367,7 @@ function LessonPlanCard({ plan, classId }: { plan: CopilotLessonPlan; classId: s
     mutationFn: async () => {
       const queued = await teacherApi.retryMissingLessonSlots(activeJobId);
       setActiveJobId(queued.jobId);
-      setGenerationStep("Đang tạo tiếp các slot còn thiếu");
+      setGenerationStep(partial?.knowledge ? "Đang tạo tiếp các slot còn thiếu" : "Đang tạo lại kiến thức và các slot còn thiếu");
       return waitForLessonGeneration(queued.jobId, setGenerationStep);
     },
     onSuccess: (result) => {
@@ -401,7 +401,7 @@ function LessonPlanCard({ plan, classId }: { plan: CopilotLessonPlan; classId: s
           <WarningCircle size={16} />
           <span>
             Đã giữ {partial.generationCompletedSlots || 0}/{partial.generationTotalSlots || 12} bài đạt chuẩn.
-            Bạn có thể review bản hiện tại hoặc chỉ tạo tiếp phần còn thiếu.
+            {partial.knowledge ? "Bạn có thể review bản hiện tại hoặc tạo tiếp phần còn thiếu." : "Phần kiến thức chưa được tạo. Bạn có thể thử lại để hoàn thành bản nháp."}
           </span>
           <button
             className="secondary-button"

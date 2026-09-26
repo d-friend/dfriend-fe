@@ -391,7 +391,7 @@ export function LessonAuthoring() {
       return;
     }
     setPhase("generating");
-    setGenerationStep("Đang tạo tiếp các slot còn thiếu");
+    setGenerationStep(partialGeneration?.knowledge ? "Đang tạo tiếp các slot còn thiếu" : "Đang tạo lại kiến thức và các slot còn thiếu");
     setError("");
     try {
       const queued = await teacherApi.retryMissingLessonSlots(activeJobId);
@@ -524,7 +524,7 @@ export function LessonAuthoring() {
         <div className="precheck-gate" role="status">
           <WarningCircle size={27} />
           <h2>Bản nháp đang có {partialGeneration.generationCompletedSlots || 0}/{partialGeneration.generationTotalSlots || 12} bài đạt chuẩn</h2>
-          <p>Phần đã đạt được giữ nguyên. Bạn có thể tạo tiếp đúng các slot còn thiếu hoặc mở bản hiện tại để review blocker.</p>
+          <p>{partialGeneration.knowledge ? "Phần đã đạt được giữ nguyên. Bạn có thể tạo tiếp đúng các slot còn thiếu hoặc mở bản hiện tại để review blocker." : "Phần kiến thức chưa được tạo. Bạn có thể thử lại để hoàn thành bản nháp hoặc mở bản hiện tại để xem blocker."}</p>
           <div>
             <button className="secondary-button" onClick={() => void finishGeneratedLesson(partialGeneration)}>Review bản hiện tại</button>
             <button className="primary-button" onClick={() => void retryMissingSlots()}>Tạo tiếp phần thiếu</button>
