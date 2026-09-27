@@ -438,6 +438,16 @@ export function LessonAuthoring() {
     router.push(`/teacher/lessons/${nextLessonId}/review?taxonomyVersion=${resultTaxonomyVersion}`);
   }
 
+  async function reviewPartialLesson() {
+    if (!partialGeneration) return;
+    setError("");
+    try {
+      await finishGeneratedLesson(partialGeneration);
+    } catch (reviewError) {
+      setError(getApiErrorMessage(reviewError, "Chưa thể mở bản review. Hãy tạo tiếp các bài còn thiếu."));
+    }
+  }
+
   return (
     <section className="lesson-immersive">
       <header className="lesson-immersive-header">
@@ -532,9 +542,9 @@ export function LessonAuthoring() {
         <div className="precheck-gate" role="status">
           <WarningCircle size={27} />
           <h2>Bản nháp đang có {partialGeneration.generationCompletedSlots || 0}/{partialGeneration.generationTotalSlots || 12} bài đạt chuẩn</h2>
-          <p>{partialGeneration.knowledge ? "Phần đã đạt được giữ nguyên. Bạn có thể tạo tiếp đúng các slot còn thiếu hoặc mở bản hiện tại để review blocker." : "Phần kiến thức chưa được tạo. Bạn có thể thử lại để hoàn thành bản nháp hoặc mở bản hiện tại để xem blocker."}</p>
+          <p>{partialGeneration.generationCompletedSlots ? "Phần đã đạt được giữ nguyên. Bạn có thể tạo tiếp đúng các slot còn thiếu hoặc mở bản hiện tại để review blocker." : "Bản nháp chưa có bài đạt chuẩn để review. Hãy tạo tiếp phần thiếu hoặc kiểm tra nguồn bài trong Kho tài liệu."}</p>
           <div>
-            <button className="secondary-button" onClick={() => void finishGeneratedLesson(partialGeneration)}>Review bản hiện tại</button>
+            {Boolean(partialGeneration.generationCompletedSlots) && <button className="secondary-button" onClick={() => void reviewPartialLesson()}>Review bản hiện tại</button>}
             <button className="primary-button" onClick={() => void retryMissingSlots()}>Tạo tiếp phần thiếu</button>
           </div>
         </div>
