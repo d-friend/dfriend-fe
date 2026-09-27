@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowLeft,
@@ -35,7 +36,7 @@ export interface ProblemView {
   qualityContractVersion?: number;
 }
 
-interface TeacherProblemAsset {
+export interface TeacherProblemAsset {
   asset_id: string;
   content_hash: string;
   target: "stem" | "part" | "choice" | "solution";
@@ -95,6 +96,7 @@ export function LessonAuthoring() {
   const [classIds, setClassIds] = useState<string[]>([]);
   const [deadline, setDeadline] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>([]);
   const [draftExerciseId, setDraftExerciseId] = useState("");
   const [activeJobId, setActiveJobId] = useState("");
   const [activeJobIdentity, setActiveJobIdentity] = useState("");
@@ -122,6 +124,11 @@ export function LessonAuthoring() {
   const concepts = useMemo(() => topics.find((item) => item.value === topic)?.concepts || [], [topics, topic]);
   const taxonomyVersion = curriculum.data?.find((item) => item.value === subject)?.taxonomy_version;
   const availableSkills = useQuery({ queryKey: ["curriculum", "skills", subject, topic, concept, taxonomyVersion], queryFn: () => teacherApi.curriculumSkills(subject, topic, concept, taxonomyVersion as number), enabled: Boolean(subject && topic && concept && taxonomyVersion), staleTime: Infinity });
+  const markerDocuments = useQuery({ queryKey: ["teacher", "documents", taxonomyVersion], queryFn: () => teacherApi.documents(taxonomyVersion as number), enabled: Boolean(taxonomyVersion) });
+  const eligibleMarkerDocuments = (markerDocuments.data || []).filter((item) =>
+    item.ingestionMode === "marker" && item.extractionStatus === "succeeded" &&
+    item.subject === subject && item.topic === topic &&
+    (!item.concept || item.concept === concept));
   const studioReadyCount = [
     title.trim(),
     subject && topic && concept,
@@ -144,8 +151,9 @@ export function LessonAuthoring() {
       skillIds: [...selectedSkills].sort(),
       classIds: [...classIds].sort(),
       draftExerciseId,
+      selectedDocumentIds: [...selectedDocumentIds].sort(),
     }),
-    [classIds, concept, description, draftExerciseId, lessonGoal, lessonKind, selectedSkills, subject, taxonomyVersion, title, topic],
+    [classIds, concept, description, draftExerciseId, lessonGoal, lessonKind, selectedDocumentIds, selectedSkills, subject, taxonomyVersion, title, topic],
   );
 
   useEffect(() => {
@@ -170,6 +178,7 @@ export function LessonAuthoring() {
           setConcept(String(saved.concept || ""));
           setClassIds(Array.isArray(saved.classIds) ? saved.classIds.map(String) : []);
           setSelectedSkills(Array.isArray(saved.selectedSkills) ? saved.selectedSkills.map(String).slice(0, 4) : []);
+          setSelectedDocumentIds(Array.isArray(saved.selectedDocumentIds) ? saved.selectedDocumentIds.map(String).slice(0, 20) : []);
           setLessonKind(saved.lessonKind === "targeted_review" ? "targeted_review" : "normal");
           setDeadline(saved.deadline ? String(saved.deadline) : defaultDeadline());
           if (saved.draftExerciseId) setDraftExerciseId(String(saved.draftExerciseId));
@@ -206,6 +215,7 @@ export function LessonAuthoring() {
       setPhase("goal");
       setDescription("");
       setFile(null);
+      setSelectedDocumentIds([]);
       setDraftExerciseId("");
       setActiveJobId("");
       setActiveJobIdentity("");
@@ -229,9 +239,9 @@ export function LessonAuthoring() {
     if (!storageReady || !storageKey) return;
     window.localStorage.setItem(
       storageKey,
-      JSON.stringify({ title, description, lessonGoal, subject, topic, concept, selectedSkills, lessonKind, classIds, deadline, draftExerciseId, activeJobId, activeJobIdentity }),
+      JSON.stringify({ title, description, lessonGoal, subject, topic, concept, selectedSkills, selectedDocumentIds, lessonKind, classIds, deadline, draftExerciseId, activeJobId, activeJobIdentity }),
     );
-  }, [storageReady, storageKey, title, description, lessonGoal, subject, topic, concept, selectedSkills, lessonKind, classIds, deadline, draftExerciseId, activeJobId, activeJobIdentity]);
+  }, [storageReady, storageKey, title, description, lessonGoal, subject, topic, concept, selectedSkills, selectedDocumentIds, lessonKind, classIds, deadline, draftExerciseId, activeJobId, activeJobIdentity]);
 
   async function begin(event: FormEvent) {
     event.preventDefault();
@@ -247,6 +257,19 @@ export function LessonAuthoring() {
         const lesson1 = await waitForLessonGeneration(resumableJobId, setGenerationStep);
         if (lesson1.generationStatus === "partial_blocked" || lesson1.generationStatus === "partial") {
           setPartialGeneration(lesson1);
+          setPhase("goal");
+          return;
+        }
+        if (["waiting_for_extraction", "source_review_required", "processing_source",
+          "source_processing"].includes(String(lesson1.generationStatus))) {
+          const queued = await teacherApi.retryMissingLessonSlots(resumableJobId);
+          setActiveJobId(queued.jobId);
+          setActiveJobIdentity(generationIdentity);
+          router.push(`/teacher/lessons/generating/${encodeURIComponent(queued.jobId)}?origin=wizard`);
+          return;
+        }
+        if (lesson1.generationStatus === "source_failed") {
+          setError("Tài liệu nguồn xử lý lỗi. Hãy kiểm tra trong Kho tài liệu trước khi tiếp tục.");
           setPhase("goal");
           return;
         }
@@ -275,6 +298,14 @@ export function LessonAuthoring() {
     }
     setPhase("precheck");
     try {
+      if (selectedDocumentIds.length) {
+        if (file || lessonKind !== "normal" || selectedDocumentIds.some((id) =>
+          !eligibleMarkerDocuments.some((item) => item.documentId === id))) {
+          throw new Error("Tài liệu Marker đã chọn không còn phù hợp với taxonomy hoặc trạng thái trích xuất.");
+        }
+        await generate(false);
+        return;
+      }
       if (file) {
         const upload = new FormData();
         upload.append("file", file);
@@ -287,10 +318,7 @@ export function LessonAuthoring() {
         upload.append("shared", "true");
         const registered = await teacherApi.uploadDocument(upload);
         setFile(null);
-        if (registered.extractionJobId) {
-          throw new Error("Tài liệu đã được lưu để Marker trích xuất. Chức năng tạo bài từ tài liệu Marker chưa sẵn sàng; hãy kiểm tra trạng thái trong Kho tài liệu.");
-        }
-        await waitForDocumentIndex(registered.documentId, taxonomyVersion);
+        throw new Error(`Tài liệu ${registered.documentId} đã được lưu cho Marker. Vào Kho tài liệu để kiểm tra đề, hình và đáp án; sau đó quay lại chọn tài liệu này để tạo bài.`);
       }
       const result = await teacherApi.precheckLesson({ title: title.trim(), lessonGoal: lessonGoal.trim(), subject, topic, concept, taxonomyVersion, explicitSkillIds: selectedSkills });
       if (lessonKind === "targeted_review") {
@@ -342,6 +370,10 @@ export function LessonAuthoring() {
       form1.append("lessonKind", lessonKind);
       form1.append("explicitSkillIds", JSON.stringify(lessonKind === "targeted_review" ? reviewSkills : selectedSkills));
       form1.append("classIds", JSON.stringify(classIds));
+      if (selectedDocumentIds.length) {
+        form1.append("selectedDocumentIds", JSON.stringify(selectedDocumentIds));
+        form1.append("exerciseSourcePolicy", "bank_only");
+      }
       if (draftExerciseId) form1.append("lessonId", draftExerciseId);
       if (allowGenerated) form1.append("allowGenerated", "true");
       const queued = await teacherApi.generateLesson1(form1);
@@ -354,7 +386,7 @@ export function LessonAuthoring() {
         if (storageKey) {
           window.localStorage.setItem(
             storageKey,
-            JSON.stringify({ title, description, lessonGoal, subject, topic, concept, selectedSkills, lessonKind, classIds, deadline, draftExerciseId, activeJobId: nextJobId, activeJobIdentity: generationIdentity }),
+            JSON.stringify({ title, description, lessonGoal, subject, topic, concept, selectedSkills, selectedDocumentIds, lessonKind, classIds, deadline, draftExerciseId, activeJobId: nextJobId, activeJobIdentity: generationIdentity }),
           );
         }
         router.push(
@@ -466,8 +498,9 @@ export function LessonAuthoring() {
               </div>
               <div className="studio-fields two">
                 <div className="form-field"><label htmlFor="lesson-deadline">Deadline</label><input id="lesson-deadline" className="input" type="datetime-local" value={deadline} onChange={(event) => setDeadline(event.target.value)} /></div>
-                <div className="form-field"><label htmlFor="lesson-file">Thêm vào kho tài liệu</label><label className="file-input"><FileArrowUp size={17} /><span>{file?.name || "Chọn tệp không bắt buộc"}</span><input id="lesson-file" type="file" accept=".pdf,.docx,.md,.txt" onChange={(event) => setFile(event.target.files?.[0] || null)} /></label></div>
+                <div className="form-field"><label htmlFor="lesson-file">Tài liệu mới</label><label className="file-input"><FileArrowUp size={17} /><span>{file?.name || "Chọn tệp để đưa vào Kho tài liệu"}</span><input id="lesson-file" type="file" accept=".pdf,.docx,.md,.txt" disabled={selectedDocumentIds.length > 0} onChange={(event) => setFile(event.target.files?.[0] || null)} /></label><small>Sau khi tải lên, kiểm tra và chuẩn bị bài nguồn trong <Link href="/teacher/documents">Kho tài liệu</Link> trước khi chọn để tạo bài.</small></div>
               </div>
+              {eligibleMarkerDocuments.length > 0 && lessonKind === "normal" ? <div className="form-field"><label>Tài liệu Marker đã trích xuất</label><div className="class-picker skill-picker">{eligibleMarkerDocuments.map((document) => <label key={document.documentId}><input type="checkbox" checked={selectedDocumentIds.includes(document.documentId)} disabled={Boolean(file) || (!selectedDocumentIds.includes(document.documentId) && selectedDocumentIds.length >= 20)} onChange={(event) => setSelectedDocumentIds((current) => event.target.checked ? [...current, document.documentId] : current.filter((id) => id !== document.documentId))} /><span><strong>{document.title}</strong><small>{document.processingStatus === "ready" || document.processingStatus === "partial" ? "Chỉ lấy bài gốc đã duyệt và chuẩn bị" : "Cần xử lý, duyệt bài và chuẩn bị trong Kho tài liệu"}</small></span></label>)}</div><small>Chọn tài liệu chỉ khi đã kiểm tra đề, hình, đáp án và lưu bài vào kho. Slot thiếu sẽ hiển thị để review.</small></div> : null}
               <div className="form-field"><label htmlFor="lesson-goal">Mục tiêu bài học</label><textarea id="lesson-goal" className="textarea studio-goal" maxLength={1000} value={lessonGoal} onChange={(event) => setLessonGoal(event.target.value)} placeholder="Có thể để trống. Nếu nhập, hãy viết điều học sinh cần làm được hoặc lỗi cần tránh." /><small>{lessonGoal.length}/1000 ký tự. Kỹ năng bạn tick bên dưới vẫn là nguồn dữ liệu chính.</small></div>
             </section>
 
@@ -509,7 +542,7 @@ export function LessonAuthoring() {
             </section>
 
             <div className="studio-submit-bar">
-              <span>{lessonKind === "targeted_review" ? "Copilot sẽ tạo bài ôn theo nhóm kỹ năng đã chọn." : "Copilot sẽ kiểm tra kho bài trước khi tự soạn phần thiếu."}</span>
+              <span>{selectedDocumentIds.length ? "Chỉ dùng bài gốc đã duyệt từ tài liệu Marker; không tự soạn bài lấp slot." : lessonKind === "targeted_review" ? "Copilot sẽ tạo bài ôn theo nhóm kỹ năng đã chọn." : "Copilot sẽ kiểm tra kho bài trước khi tự soạn phần thiếu."}</span>
               <button className="primary-button authoring-submit" type="submit" disabled={phase === "precheck"}><Sparkle size={17} weight="fill" /> {phase === "precheck" ? "Đang kiểm tra nguồn bài" : "Kiểm tra và tạo bài"}<ArrowRight size={16} /></button>
             </div>
           </div>
@@ -549,6 +582,8 @@ export function DraftProblemList({
   onToggle,
   onGuidanceChange,
   readOnly = false,
+  onAssetError,
+  onAssetLoad,
 }: {
   problems: ProblemView[];
   rejected: Set<string>;
@@ -556,6 +591,8 @@ export function DraftProblemList({
   onToggle: (id: string) => void;
   onGuidanceChange: (id: string, field: keyof RegenerationGuidance, value: string) => void;
   readOnly?: boolean;
+  onAssetError?: (asset: TeacherProblemAsset) => void;
+  onAssetLoad?: (asset: TeacherProblemAsset) => void;
 }) {
   const [expandedAsset, setExpandedAsset] = useState<TeacherProblemAsset | null>(null);
   if (!problems.length) return <div className="list-empty"><Lightbulb size={26} /><h3>Chưa tìm thấy danh sách bài</h3><p>Bản nháp có thể cần được tạo lại.</p></div>;
@@ -565,8 +602,8 @@ export function DraftProblemList({
     return <article key={problem.id} data-rejected={needsReplacement}>
       <header><span>{String(index + 1).padStart(2, "0")}</span><div><strong>{problem.role ? masteryRoleLabels[problem.role] || problem.role : "Bài luyện tập"}</strong><small>{problem.skill || "Theo mục tiêu bài học"}</small>{problemSourceLabel(problem) && <small className="problem-origin">{problemSourceLabel(problem)}</small>}</div>{!readOnly && <button className={needsReplacement ? "secondary-button" : "text-button"} onClick={() => onToggle(problem.id)}>{needsReplacement ? "Giữ lại" : "Cần thay"}</button>}</header>
       <MathContent>{problem.prompt}</MathContent>
-      <TeacherAssetList assets={(problem.assets || []).filter((asset) => asset.audience === "public_problem" && asset.target === "stem")} onExpand={setExpandedAsset} />
-      {problem.choices?.length ? <ol type="A">{problem.choices.map((choice, choiceIndex) => <li key={`${problem.id}:${choiceIndex}`}><MathContent answer>{choice}</MathContent><TeacherAssetList assets={(problem.assets || []).filter((asset) => asset.audience === "public_problem" && asset.target === "choice" && asset.target_id === problem.choiceIds?.[choiceIndex])} onExpand={setExpandedAsset} /></li>)}</ol> : null}
+      <TeacherAssetList assets={(problem.assets || []).filter((asset) => asset.audience === "public_problem" && asset.target === "stem")} onExpand={setExpandedAsset} onAssetError={onAssetError} onAssetLoad={onAssetLoad} />
+      {problem.choices?.length ? <ol type="A">{problem.choices.map((choice, choiceIndex) => <li key={`${problem.id}:${choiceIndex}`}><MathContent answer>{choice}</MathContent><TeacherAssetList assets={(problem.assets || []).filter((asset) => asset.audience === "public_problem" && asset.target === "choice" && asset.target_id === problem.choiceIds?.[choiceIndex])} onExpand={setExpandedAsset} onAssetError={onAssetError} onAssetLoad={onAssetLoad} /></li>)}</ol> : null}
       {(problem.assets || []).some((asset) => asset.target === "choice" && !problem.choiceIds?.includes(asset.target_id || "")) ? <p className="draft-asset-unavailable">Hình của lựa chọn chưa khớp với đáp án hiển thị; bài này cần kiểm tra trước khi xuất bản.</p> : null}
       {(problem.assets || []).some((asset) => asset.target === "part") ? <p className="draft-asset-unavailable">Hình gắn với ý nhỏ chưa có vị trí hiển thị trong bản nháp này.</p> : null}
       {problem.answer ? <div className="draft-answer"><span>Đáp án</span><MathContent answer>{problem.answer}</MathContent></div> : null}
@@ -587,7 +624,7 @@ export function DraftProblemList({
   ) : null}</div>;
 }
 
-function TeacherAssetList({ assets, onExpand }: { assets: TeacherProblemAsset[]; onExpand: (asset: TeacherProblemAsset) => void }) {
+function TeacherAssetList({ assets, onExpand, onAssetError, onAssetLoad }: { assets: TeacherProblemAsset[]; onExpand: (asset: TeacherProblemAsset) => void; onAssetError?: (asset: TeacherProblemAsset) => void; onAssetLoad?: (asset: TeacherProblemAsset) => void }) {
   if (!assets.length) return null;
   return <div className="draft-problem-assets" aria-label="Hình của bài tập">{[...assets].sort((a, b) => a.order - b.order).map((asset) => {
     const url = safeTeacherAssetUrl(asset.access_url);
@@ -595,7 +632,7 @@ function TeacherAssetList({ assets, onExpand }: { assets: TeacherProblemAsset[];
       <button type="button" onClick={() => onExpand(asset)} aria-label="Mở hình lớn">
         {/* Private signed URLs must load directly without a Next image proxy. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={url} width={asset.width} height={asset.height} alt={asset.alt_text || "Hình của bài tập"} />
+        <img src={url} width={asset.width} height={asset.height} alt={asset.alt_text || "Hình của bài tập"} onError={() => onAssetError?.(asset)} onLoad={() => onAssetLoad?.(asset)} />
         <span>Phóng to hình</span>
       </button>
     ) : <span className="draft-asset-unavailable">Chưa tải được hình của bài này.</span>}</div>;
@@ -612,29 +649,14 @@ function safeTeacherAssetUrl(value: string | null | undefined): string | null {
   return null;
 }
 
-export function DraftReviewContent({ review, rejected, guidance, onToggle, onGuidanceChange, readOnly = false }: { review: DraftReviewModel; rejected: Set<string>; guidance: RegenerationGuidanceByProblem; onToggle: (id: string) => void; onGuidanceChange: (id: string, field: keyof RegenerationGuidance, value: string) => void; readOnly?: boolean }) {
+export function DraftReviewContent({ review, rejected, guidance, onToggle, onGuidanceChange, readOnly = false, onAssetError, onAssetLoad }: { review: DraftReviewModel; rejected: Set<string>; guidance: RegenerationGuidanceByProblem; onToggle: (id: string) => void; onGuidanceChange: (id: string, field: keyof RegenerationGuidance, value: string) => void; readOnly?: boolean; onAssetError?: (asset: TeacherProblemAsset) => void; onAssetLoad?: (asset: TeacherProblemAsset) => void }) {
   const hasContent = review.knowledgeSections.length || review.knowledgeProblems.length || review.masteryProblems.length;
   if (!hasContent) return <div className="list-empty"><Lightbulb size={26} /><h3>Bản nháp chưa có nội dung</h3><p>Thử tạo lại bài học để tải đủ phần kiến thức và luyện tập.</p></div>;
   return <div className="draft-review-content">
     {review.knowledgeSections.length > 0 && <section id="session-1-knowledge" className="draft-review-section"><header><div><span>Session 1</span><h2>Nội dung kiến thức</h2></div><small>{review.knowledgeSections.length} phần</small></header><div className="draft-knowledge-list">{review.knowledgeSections.map((section, index) => <article key={section.id}><span>Phần {String(index + 1).padStart(2, "0")}</span><h3>{section.title}</h3><MathContent>{section.content}</MathContent></article>)}</div></section>}
-    {review.knowledgeProblems.length > 0 && <section id="session-1-checkpoints" className="draft-review-section"><header><div><span>Session 1</span><h2>Câu kiểm tra kiến thức</h2></div><small>{review.knowledgeProblems.length} câu</small></header><DraftProblemList problems={review.knowledgeProblems} rejected={rejected} guidance={guidance} onToggle={onToggle} onGuidanceChange={onGuidanceChange} readOnly={readOnly} /></section>}
-    {review.masteryProblems.length > 0 && <section id="session-2-mastery" className="draft-review-section"><header><div><span>Session 2</span><h2>Bài luyện tập mastery</h2></div><small>{review.masteryProblems.length} bài</small></header><DraftProblemList problems={review.masteryProblems} rejected={rejected} guidance={guidance} onToggle={onToggle} onGuidanceChange={onGuidanceChange} readOnly={readOnly} /></section>}
+    {review.knowledgeProblems.length > 0 && <section id="session-1-checkpoints" className="draft-review-section"><header><div><span>Session 1</span><h2>Câu kiểm tra kiến thức</h2></div><small>{review.knowledgeProblems.length} câu</small></header><DraftProblemList problems={review.knowledgeProblems} rejected={rejected} guidance={guidance} onToggle={onToggle} onGuidanceChange={onGuidanceChange} readOnly={readOnly} onAssetError={onAssetError} onAssetLoad={onAssetLoad} /></section>}
+    {review.masteryProblems.length > 0 && <section id="session-2-mastery" className="draft-review-section"><header><div><span>Session 2</span><h2>Bài luyện tập mastery</h2></div><small>{review.masteryProblems.length} bài</small></header><DraftProblemList problems={review.masteryProblems} rejected={rejected} guidance={guidance} onToggle={onToggle} onGuidanceChange={onGuidanceChange} readOnly={readOnly} onAssetError={onAssetError} onAssetLoad={onAssetLoad} /></section>}
   </div>;
-}
-
-async function waitForDocumentIndex(documentId: string, taxonomyVersion: number) {
-  const timeoutAt = Date.now() + 120_000;
-  while (Date.now() < timeoutAt) {
-    const document = (await teacherApi.documents(taxonomyVersion)).find(
-      (item) => item.documentId === documentId,
-    );
-    if (document?.indexStatus === "ready") return;
-    if (document?.indexStatus === "failed" || document?.indexStatus === "needs_manual") {
-      throw new Error("Tài liệu chưa đủ rõ để tự động dùng cho bài học này.");
-    }
-    await new Promise((resolve) => window.setTimeout(resolve, 1500));
-  }
-  throw new Error("Lập chỉ mục tài liệu mất quá nhiều thời gian. Hãy thử lại sau.");
 }
 
 export function normalizeProblems(value: unknown, namespace = "problem"): ProblemView[] {

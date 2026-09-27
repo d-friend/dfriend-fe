@@ -553,7 +553,7 @@ export interface ApiErrorEnvelope {
   statusCode: number;
   timestamp?: string;
   path?: string;
-  message: string | string[];
+  message: string | Array<string | { msg?: string; detail?: string }>;
   blockers?: Array<{ code?: string; message?: string; detail?: string }>;
 }
 
@@ -662,6 +662,7 @@ export interface StudentExercise {
 export interface StudyProblem {
   problem_id: number;
   question: string;
+  bank_problem_id?: string;
   attachment_url?: string;
   assets?: StudyProblemAsset[];
   recommended_problem_role?: string;
