@@ -22,7 +22,10 @@ export type LessonGenerationResult = Record<string, unknown> & {
   retryAllowed?: boolean;
 };
 
-const LESSON_AUTHORING_STORAGE_PREFIX = "teacher:lesson-draft-form:v2:";
+const LESSON_AUTHORING_STORAGE_PREFIXES = [
+  "teacher:lesson-draft-form:v2:",
+  "teacher:lesson-draft-form:v3:",
+];
 const MAX_CONSECUTIVE_TRANSIENT_POLL_FAILURES = 5;
 const TRANSIENT_POLL_STATUSES = [500, 502, 503, 504] as const;
 
@@ -30,7 +33,7 @@ export function replaceStoredLessonGenerationJob(currentJobId: string, nextJobId
   if (typeof window === "undefined" || !currentJobId) return;
   for (let index = 0; index < window.localStorage.length; index += 1) {
     const key = window.localStorage.key(index);
-    if (!key?.startsWith(LESSON_AUTHORING_STORAGE_PREFIX)) continue;
+    if (!key || !LESSON_AUTHORING_STORAGE_PREFIXES.some((prefix) => key.startsWith(prefix))) continue;
     try {
       const raw = window.localStorage.getItem(key);
       if (!raw) continue;

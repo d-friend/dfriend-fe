@@ -96,7 +96,6 @@ export function LessonAuthoring() {
   const [classIds, setClassIds] = useState<string[]>([]);
   const [deadline, setDeadline] = useState("");
   const [file, setFile] = useState<File | null>(null);
-  const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>([]);
   const [draftExerciseId, setDraftExerciseId] = useState("");
   const [activeJobId, setActiveJobId] = useState("");
   const [activeJobIdentity, setActiveJobIdentity] = useState("");
@@ -124,11 +123,6 @@ export function LessonAuthoring() {
   const concepts = useMemo(() => topics.find((item) => item.value === topic)?.concepts || [], [topics, topic]);
   const taxonomyVersion = curriculum.data?.find((item) => item.value === subject)?.taxonomy_version;
   const availableSkills = useQuery({ queryKey: ["curriculum", "skills", subject, topic, concept, taxonomyVersion], queryFn: () => teacherApi.curriculumSkills(subject, topic, concept, taxonomyVersion as number), enabled: Boolean(subject && topic && concept && taxonomyVersion), staleTime: Infinity });
-  const markerDocuments = useQuery({ queryKey: ["teacher", "documents", taxonomyVersion], queryFn: () => teacherApi.documents(taxonomyVersion as number), enabled: Boolean(taxonomyVersion) });
-  const eligibleMarkerDocuments = (markerDocuments.data || []).filter((item) =>
-    item.ingestionMode === "marker" && item.extractionStatus === "succeeded" &&
-    item.subject === subject && item.topic === topic &&
-    (!item.concept || item.concept === concept));
   const studioReadyCount = [
     title.trim(),
     subject && topic && concept,
@@ -136,7 +130,7 @@ export function LessonAuthoring() {
     classIds.length,
   ].filter(Boolean).length;
   const storageKey = me.data?.id
-    ? `teacher:lesson-draft-form:v2:${me.data.id}${reportId ? `:report:${reportId}` : ""}`
+    ? `teacher:lesson-draft-form:v3:${me.data.id}${reportId ? `:report:${reportId}` : ""}`
     : "";
   const generationIdentity = useMemo(
     () => JSON.stringify({
@@ -151,9 +145,8 @@ export function LessonAuthoring() {
       skillIds: [...selectedSkills].sort(),
       classIds: [...classIds].sort(),
       draftExerciseId,
-      selectedDocumentIds: [...selectedDocumentIds].sort(),
     }),
-    [classIds, concept, description, draftExerciseId, lessonGoal, lessonKind, selectedDocumentIds, selectedSkills, subject, taxonomyVersion, title, topic],
+    [classIds, concept, description, draftExerciseId, lessonGoal, lessonKind, selectedSkills, subject, taxonomyVersion, title, topic],
   );
 
   useEffect(() => {
@@ -178,7 +171,6 @@ export function LessonAuthoring() {
           setConcept(String(saved.concept || ""));
           setClassIds(Array.isArray(saved.classIds) ? saved.classIds.map(String) : []);
           setSelectedSkills(Array.isArray(saved.selectedSkills) ? saved.selectedSkills.map(String).slice(0, 4) : []);
-          setSelectedDocumentIds(Array.isArray(saved.selectedDocumentIds) ? saved.selectedDocumentIds.map(String).slice(0, 20) : []);
           setLessonKind(saved.lessonKind === "targeted_review" ? "targeted_review" : "normal");
           setDeadline(saved.deadline ? String(saved.deadline) : defaultDeadline());
           if (saved.draftExerciseId) setDraftExerciseId(String(saved.draftExerciseId));
@@ -215,7 +207,6 @@ export function LessonAuthoring() {
       setPhase("goal");
       setDescription("");
       setFile(null);
-      setSelectedDocumentIds([]);
       setDraftExerciseId("");
       setActiveJobId("");
       setActiveJobIdentity("");
@@ -239,9 +230,9 @@ export function LessonAuthoring() {
     if (!storageReady || !storageKey) return;
     window.localStorage.setItem(
       storageKey,
-      JSON.stringify({ title, description, lessonGoal, subject, topic, concept, selectedSkills, selectedDocumentIds, lessonKind, classIds, deadline, draftExerciseId, activeJobId, activeJobIdentity }),
+      JSON.stringify({ title, description, lessonGoal, subject, topic, concept, selectedSkills, lessonKind, classIds, deadline, draftExerciseId, activeJobId, activeJobIdentity }),
     );
-  }, [storageReady, storageKey, title, description, lessonGoal, subject, topic, concept, selectedSkills, selectedDocumentIds, lessonKind, classIds, deadline, draftExerciseId, activeJobId, activeJobIdentity]);
+  }, [storageReady, storageKey, title, description, lessonGoal, subject, topic, concept, selectedSkills, lessonKind, classIds, deadline, draftExerciseId, activeJobId, activeJobIdentity]);
 
   async function begin(event: FormEvent) {
     event.preventDefault();
@@ -298,14 +289,6 @@ export function LessonAuthoring() {
     }
     setPhase("precheck");
     try {
-      if (selectedDocumentIds.length) {
-        if (file || lessonKind !== "normal" || selectedDocumentIds.some((id) =>
-          !eligibleMarkerDocuments.some((item) => item.documentId === id))) {
-          throw new Error("Tài liệu Marker đã chọn không còn phù hợp với taxonomy hoặc trạng thái trích xuất.");
-        }
-        await generate(false);
-        return;
-      }
       if (file) {
         const upload = new FormData();
         upload.append("file", file);
@@ -318,10 +301,10 @@ export function LessonAuthoring() {
         upload.append("shared", "true");
         const registered = await teacherApi.uploadDocument(upload);
         setFile(null);
-        throw new Error(`Tài liệu ${registered.documentId} đã được lưu cho Marker. Vào Kho tài liệu để kiểm tra đề, hình và đáp án; sau đó quay lại chọn tài liệu này để tạo bài.`);
+        throw new Error(`Tài liệu ${registered.documentId} đã được lưu cho Marker. Kiểm tra đề, hình và đáp án trong Kho tài liệu; bài đã chuẩn bị sẽ được tìm tự động ở lần tạo lesson tiếp theo.`);
       }
-      const result = await teacherApi.precheckLesson({ title: title.trim(), lessonGoal: lessonGoal.trim(), subject, topic, concept, taxonomyVersion, explicitSkillIds: selectedSkills });
       if (lessonKind === "targeted_review") {
+        const result = await teacherApi.precheckLesson({ title: title.trim(), lessonGoal: lessonGoal.trim(), subject, topic, concept, taxonomyVersion, explicitSkillIds: selectedSkills });
         if (selectedSkills.length < 2) {
           setError("Mục tiêu ôn tập cần nhận diện ít nhất hai kỹ năng trong cùng khái niệm.");
           setPhase("goal");
@@ -331,10 +314,7 @@ export function LessonAuthoring() {
         setPrecheckData({ ...result, targetedReviewSelection: true });
         return;
       }
-      // Creating the draft is the teacher's deliberate action. Mastery v2 fills only
-      // concrete `(skill, role)` deficits and discloses the generated count in review,
-      // so a separate shortage confirmation is no longer needed.
-      await generate(true);
+      await generate();
     } catch (precheckError) {
       // Precheck is the hard spending/quality gate. A network or auth failure is not
       // evidence that material exists, so do not fall through into two LLM calls.
@@ -350,7 +330,7 @@ export function LessonAuthoring() {
     }
   }
 
-  async function generate(allowGenerated: boolean) {
+  async function generate() {
     setPrecheckData(null);
     setPartialGeneration(null);
     setPhase("generating");
@@ -370,12 +350,8 @@ export function LessonAuthoring() {
       form1.append("lessonKind", lessonKind);
       form1.append("explicitSkillIds", JSON.stringify(lessonKind === "targeted_review" ? reviewSkills : selectedSkills));
       form1.append("classIds", JSON.stringify(classIds));
-      if (selectedDocumentIds.length) {
-        form1.append("selectedDocumentIds", JSON.stringify(selectedDocumentIds));
-        form1.append("exerciseSourcePolicy", "bank_only");
-      }
+      form1.append("exerciseSourcePolicy", "source_and_bank");
       if (draftExerciseId) form1.append("lessonId", draftExerciseId);
-      if (allowGenerated) form1.append("allowGenerated", "true");
       const queued = await teacherApi.generateLesson1(form1);
       if (queued.jobId) {
         const nextJobId = String(queued.jobId);
@@ -386,7 +362,7 @@ export function LessonAuthoring() {
         if (storageKey) {
           window.localStorage.setItem(
             storageKey,
-            JSON.stringify({ title, description, lessonGoal, subject, topic, concept, selectedSkills, selectedDocumentIds, lessonKind, classIds, deadline, draftExerciseId, activeJobId: nextJobId, activeJobIdentity: generationIdentity }),
+            JSON.stringify({ title, description, lessonGoal, subject, topic, concept, selectedSkills, lessonKind, classIds, deadline, draftExerciseId, activeJobId: nextJobId, activeJobIdentity: generationIdentity }),
           );
         }
         router.push(
@@ -498,9 +474,8 @@ export function LessonAuthoring() {
               </div>
               <div className="studio-fields two">
                 <div className="form-field"><label htmlFor="lesson-deadline">Deadline</label><input id="lesson-deadline" className="input" type="datetime-local" value={deadline} onChange={(event) => setDeadline(event.target.value)} /></div>
-                <div className="form-field"><label htmlFor="lesson-file">Tài liệu mới</label><label className="file-input"><FileArrowUp size={17} /><span>{file?.name || "Chọn tệp để đưa vào Kho tài liệu"}</span><input id="lesson-file" type="file" accept=".pdf,.docx,.md,.txt" disabled={selectedDocumentIds.length > 0} onChange={(event) => setFile(event.target.files?.[0] || null)} /></label><small>Sau khi tải lên, kiểm tra và chuẩn bị bài nguồn trong <Link href="/teacher/documents">Kho tài liệu</Link> trước khi chọn để tạo bài.</small></div>
+                <div className="form-field"><label htmlFor="lesson-file">Tài liệu mới</label><label className="file-input"><FileArrowUp size={17} /><span>{file?.name || "Chọn tệp để đưa vào Kho tài liệu"}</span><input id="lesson-file" type="file" accept=".pdf,.docx,.md,.txt" onChange={(event) => setFile(event.target.files?.[0] || null)} /></label><small>Sau khi tải lên, kiểm tra đề, hình và đáp án trong <Link href="/teacher/documents">Kho tài liệu</Link>. Bài đủ điều kiện được tìm tự động khi tạo lesson.</small></div>
               </div>
-              {eligibleMarkerDocuments.length > 0 && lessonKind === "normal" ? <div className="form-field"><label>Tài liệu Marker đã trích xuất</label><div className="class-picker skill-picker">{eligibleMarkerDocuments.map((document) => <label key={document.documentId}><input type="checkbox" checked={selectedDocumentIds.includes(document.documentId)} disabled={Boolean(file) || (!selectedDocumentIds.includes(document.documentId) && selectedDocumentIds.length >= 20)} onChange={(event) => setSelectedDocumentIds((current) => event.target.checked ? [...current, document.documentId] : current.filter((id) => id !== document.documentId))} /><span><strong>{document.title}</strong><small>{document.processingStatus === "ready" || document.processingStatus === "partial" ? "Chỉ lấy bài gốc đã duyệt và chuẩn bị" : "Cần xử lý, duyệt bài và chuẩn bị trong Kho tài liệu"}</small></span></label>)}</div><small>Chọn tài liệu chỉ khi đã kiểm tra đề, hình, đáp án và lưu bài vào kho. Slot thiếu sẽ hiển thị để review.</small></div> : null}
               <div className="form-field"><label htmlFor="lesson-goal">Mục tiêu bài học</label><textarea id="lesson-goal" className="textarea studio-goal" maxLength={1000} value={lessonGoal} onChange={(event) => setLessonGoal(event.target.value)} placeholder="Có thể để trống. Nếu nhập, hãy viết điều học sinh cần làm được hoặc lỗi cần tránh." /><small>{lessonGoal.length}/1000 ký tự. Kỹ năng bạn tick bên dưới vẫn là nguồn dữ liệu chính.</small></div>
             </section>
 
@@ -542,7 +517,7 @@ export function LessonAuthoring() {
             </section>
 
             <div className="studio-submit-bar">
-              <span>{selectedDocumentIds.length ? "Chỉ dùng bài gốc đã duyệt từ tài liệu Marker; không tự soạn bài lấp slot." : lessonKind === "targeted_review" ? "Copilot sẽ tạo bài ôn theo nhóm kỹ năng đã chọn." : "Copilot sẽ kiểm tra kho bài trước khi tự soạn phần thiếu."}</span>
+              <span>Hệ thống tự chọn bài gốc đã kiểm tra từ tài liệu Marker và bài có sẵn trong kho. Slot thiếu sẽ hiện ở review; không tự soạn bài mới.</span>
               <button className="primary-button authoring-submit" type="submit" disabled={phase === "precheck"}><Sparkle size={17} weight="fill" /> {phase === "precheck" ? "Đang kiểm tra nguồn bài" : "Kiểm tra và tạo bài"}<ArrowRight size={16} /></button>
             </div>
           </div>
@@ -550,7 +525,7 @@ export function LessonAuthoring() {
       )}
 
       {precheckData && precheckData.targetedReviewSelection === true && (
-        <div className="precheck-gate"><WarningCircle size={27} /><h2>Chọn kỹ năng cần ôn</h2><p>Copilot nhận diện các kỹ năng dưới đây từ mục tiêu. Chọn từ hai đến bốn kỹ năng để tạo bài ôn trong đúng khái niệm này.</p><div className="class-picker">{(Array.isArray(precheckData.skill_ids) ? precheckData.skill_ids : []).filter((skill): skill is string => typeof skill === "string").map((skill) => { const checked = reviewSkills.includes(skill); return <label key={skill}><input type="checkbox" checked={checked} disabled={!checked && reviewSkills.length >= 4} onChange={(event) => setReviewSkills((current) => event.target.checked ? [...current, skill].slice(0, 4) : current.filter((item) => item !== skill))} /><span><strong>{skill}</strong></span></label>; })}</div><div><button className="secondary-button" onClick={() => { setPrecheckData(null); setPhase("goal"); }}>Quay lại</button><button className="primary-button" disabled={reviewSkills.length < 2 || reviewSkills.length > 4} onClick={() => void generate(true)}>Tạo bài ôn</button></div></div>
+        <div className="precheck-gate"><WarningCircle size={27} /><h2>Chọn kỹ năng cần ôn</h2><p>Copilot nhận diện các kỹ năng dưới đây từ mục tiêu. Chọn từ hai đến bốn kỹ năng để tạo bài ôn trong đúng khái niệm này.</p><div className="class-picker">{(Array.isArray(precheckData.skill_ids) ? precheckData.skill_ids : []).filter((skill): skill is string => typeof skill === "string").map((skill) => { const checked = reviewSkills.includes(skill); return <label key={skill}><input type="checkbox" checked={checked} disabled={!checked && reviewSkills.length >= 4} onChange={(event) => setReviewSkills((current) => event.target.checked ? [...current, skill].slice(0, 4) : current.filter((item) => item !== skill))} /><span><strong>{skill}</strong></span></label>; })}</div><div><button className="secondary-button" onClick={() => { setPrecheckData(null); setPhase("goal"); }}>Quay lại</button><button className="primary-button" disabled={reviewSkills.length < 2 || reviewSkills.length > 4} onClick={() => void generate()}>Tạo bài ôn</button></div></div>
       )}
 
       {partialGeneration && phase === "goal" && (
