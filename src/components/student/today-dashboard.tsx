@@ -86,6 +86,10 @@ export function TodayDashboard() {
       return new Date(a.due_date).getTime() - new Date(b.due_date).getTime();
     });
   }, [assignmentsQuery.data, hydrated, meQuery.data?.id, now]);
+  const openAssignments = useMemo(
+    () => assignments.filter((assignment) => roadmapMap.get(assignment.assignment_id)?.status === "active"),
+    [assignments, roadmapMap],
+  );
   const followUps = useMemo(
     () =>
       roadmaps.flatMap((query, classIndex) =>
@@ -104,9 +108,9 @@ export function TodayDashboard() {
     [classesQuery.data, roadmaps],
   );
 
-  const isLoading = meQuery.isLoading || classesQuery.isLoading || assignmentsQuery.isLoading;
+  const isLoading = meQuery.isLoading || classesQuery.isLoading || assignmentsQuery.isLoading || roadmaps.some((query) => query.isLoading);
   const hasPartialError =
-    meQuery.isError || classesQuery.isError || assignmentsQuery.isError || metricsQuery.isError;
+    meQuery.isError || classesQuery.isError || assignmentsQuery.isError || metricsQuery.isError || roadmaps.some((query) => query.isError);
   const name = (meQuery.data?.full_name || meQuery.data?.username || "bạn").split(/\s+/).at(-1);
   const metrics = metricsQuery.data;
   const metricItems = studentMetricItems(metrics);
@@ -130,7 +134,7 @@ export function TodayDashboard() {
           <strong>{classesQuery.data?.length || 0}</strong>
           <span>lớp đang tham gia</span>
           <i />
-          <strong>{assignments.length + followUps.length}</strong>
+          <strong>{openAssignments.length + followUps.length}</strong>
           <span>bài đang mở</span>
         </div>
       </motion.section>
@@ -185,12 +189,12 @@ export function TodayDashboard() {
             <p>Dùng mã lớp giáo viên gửi để nhận bài học và lộ trình của bạn.</p>
             <Link className="student-primary-button" href="/student/classes?join=1">Nhập mã lớp</Link>
           </div>
-        ) : assignments.length || followUps.length ? (
+        ) : openAssignments.length || followUps.length ? (
           <div className="lesson-grid">
             {followUps.map((followUp, index) => (
               <FollowUpCard key={followUp.lessonId} {...followUp} index={index} />
             ))}
-            {assignments.map((assignment, index) => (
+            {openAssignments.map((assignment, index) => (
               <LessonCard
                 key={assignment.assignment_id}
                 assignment={assignment}
