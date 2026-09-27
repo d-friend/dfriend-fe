@@ -191,13 +191,19 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
     () => completeBlueprintArcIds(matrix, problemByBankId),
     [matrix, problemByBankId],
   );
-  const notices = useMemo(
-    () => normalizeContentNotices(draft?.mastery_notices ?? draft?.masteryNotices),
-    [draft],
-  );
   const poolDeficitCount = matrix
     ? matrix.slots.filter((slot) => !slot.problem_id || !problemByBankId.has(slot.problem_id)).length
     : 0;
+  const notices = useMemo(() => {
+    const missingSlotIds = matrix?.slots
+      .filter((slot) => !slot.problem_id || !problemByBankId.has(slot.problem_id))
+      .map((slot) => slot.slot_id);
+    return normalizeContentNotices(draft?.mastery_notices ?? draft?.masteryNotices)
+      .map((notice) => notice.code === "mastery_slots_missing" && missingSlotIds
+        ? { ...notice, slotIds: missingSlotIds }
+        : notice)
+      .filter((notice) => notice.code !== "mastery_slots_missing" || notice.slotIds.length > 0);
+  }, [draft, matrix, problemByBankId]);
   const hasCompleteArc = matrix ? completeArcIds.length > 0 : poolDeficitCount === 0;
   const contentWithoutMastery: DraftReviewModel = useMemo(
     () => ({ ...reviewWithAssets, masteryProblems: matrix ? [] : reviewWithAssets.masteryProblems }),
