@@ -115,12 +115,15 @@ export function DocumentsWorkspace() {
       };
     },
     onSuccess: async ({ uploaded, failed }) => {
+      setError("");
       setFiles(failed.map((item) => item.file));
       const extracting = uploaded.filter((item) => "result" in item && item.result?.extractionJobId).length;
-      setSuccess(uploaded.length ? extracting
-        ? `Đã lưu ${uploaded.length} tài liệu. ${extracting} tài liệu đang chờ Marker trích xuất; số bài tập chưa được xác định.`
-        : `Đã lưu ${uploaded.length} tài liệu vào kho.` : "");
-      setError(failed.length ? `${failed.length} tệp chưa tải được: ${failed.map((item) => `${item.file.name} (${item.error})`).join("; ")}` : "");
+      setSuccess(uploaded.length
+        ? `Đã lưu ${uploaded.length} tài liệu; ${extracting} đã vào hàng đợi Marker.` : "");
+      if (uploaded.length > extracting) {
+        setError(`${uploaded.length - extracting} tài liệu đã lưu nhưng chưa xếp hàng. Bấm “Xếp hàng trích xuất” tại thẻ tài liệu để thử lại.`);
+      }
+      if (failed.length) setError(`${failed.length} tệp chưa tải được: ${failed.map((item) => `${item.file.name} (${item.error})`).join("; ")}`);
       if (!failed.length) {
         setTitle("");
         setDescription("");
@@ -354,12 +357,12 @@ export function DocumentsWorkspace() {
               <div><h2>{document.title}</h2><p>{document.description || document.fileName || "Nguồn bài tập đã phân loại"}</p></div>
               <div className="taxonomy-path"><span>{document.subject}</span><span>{document.topic}</span><span>{document.concept || "Tài liệu chung"}</span></div>
               {document.indexStatus === "needs_manual" && <p className="document-index-help">{documentIndexHelp(document.indexSummary)}</p>}
-              {document.extractionJobId && document.extractionStatus === "failed" && <p className="document-index-help">Trích xuất thất bại. Tài liệu chưa sẵn sàng để dùng trong bài học.</p>}
+              {document.extractionJobId && document.extractionStatus === "failed" && <p className="document-index-help">Trích xuất thất bại{document.extractionErrorCode ? ` (${document.extractionErrorCode})` : ""}. Tài liệu chưa sẵn sàng để dùng trong bài học.</p>}
               {document.extractionJobId && document.extractionStatus === "budget_exhausted" && <p className="document-index-help">Đã chạm ngân sách trích xuất tháng này. Tài liệu đang chờ xử lý.</p>}
               {Boolean(document.indexSummary?.unreadable_objects) && <p className="document-index-help">Có {document.indexSummary?.unreadable_objects} công thức hoặc hình chưa đọc được. Vẫn có thể dùng cấu trúc nhận diện được để soạn bài mới; bài mới không phải bản trích nguyên.</p>}
-              {document.ingestionMode !== "marker" && !document.extractionJobId && (
+              {(!document.extractionJobId || document.extractionStatus === "failed" || document.extractionStatus === "budget_exhausted") && (
                 <button type="button" className="document-marker-action" disabled={extractMarker.isPending} onClick={() => extractMarker.mutate(document.documentId)}>
-                  <ArrowsClockwise size={15} /> Trích xuất hình bằng Marker
+                  <ArrowsClockwise size={15} /> {document.extractionJobId ? "Thử lại trích xuất Marker" : "Xếp hàng trích xuất Marker"}
                 </button>
               )}
               {document.ingestionMode === "marker" && document.extractionStatus === "succeeded" && (

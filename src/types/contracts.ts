@@ -538,6 +538,7 @@ export interface ExerciseDocument {
   extractionJobId?: string | null;
   ingestionMode?: "legacy" | "marker";
   extractionStatus?: "pending_dispatch" | "dispatching" | "queued" | "running" | "succeeded" | "partial" | "failed" | "budget_exhausted" | "cancelled" | null;
+  extractionErrorCode?: string | null;
   processingStatus?: "not_started" | "pending" | "running" | "ready" | "partial" | "failed" | null;
   extractedPageCount?: number | null;
   indexSummary?: Record<string, number>;
