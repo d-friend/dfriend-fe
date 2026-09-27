@@ -141,7 +141,9 @@ export function LessonGenerationJobWorkspace({ jobId }: { jobId: string }) {
             Đã hoàn thành {partial.generationCompletedSlots || 0}
             {typeof partial.generationTotalSlots === "number" ? `/${partial.generationTotalSlots}` : ""} slot nhưng chưa có arc 4/4. {hasKnowledge ? "Thử lại sẽ giữ nguyên kiến thức và chỉ tạo các slot còn thiếu." : "Thử lại sẽ tạo phần kiến thức rồi tiếp tục các slot còn thiếu."}
           </p>
+          {Boolean(partial.selectedDocumentIds?.length) && typeof partial.sourceCount === "number" && typeof partial.materializedCount === "number" && partial.materializedCount < Math.max(partial.sourceCount, 1) && <p className="lesson-generation-lead">Nguồn Marker: {partial.materializedCount}/{partial.sourceCount} bài phù hợp đã chuẩn bị vào kho. Kiểm tra đề, hình và đáp án trong Kho tài liệu để bổ sung bài đủ điều kiện.</p>}
           <div className="lesson-generation-actions">
+            {Boolean(partial.selectedDocumentIds?.length) && <button className="secondary-button" type="button" onClick={() => router.push("/teacher/documents")}>Kiểm tra bài nguồn</button>}
             <button
               className="secondary-button"
               type="button"

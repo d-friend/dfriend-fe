@@ -79,7 +79,16 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
   const classes = useQuery({ queryKey: ["teacher", "classes"], queryFn: teacherApi.classes });
   const draft = draftQuery.data;
   const isPublished = published || draft?.status === "published" || Boolean(draft?.published_at);
-  const markerBankOnly = draft?.exercise_source_policy === "bank_only";
+  const reviewedSourcesOnly = draft?.exercise_source_policy === "bank_only" ||
+    draft?.exercise_source_policy === "source_and_bank";
+  const mixedSources = draft?.exercise_source_policy === "source_and_bank";
+  const sourceJobResult = asRecord(generationJobQuery.data?.result) || {};
+  const sourceDocumentCount = Array.isArray(sourceJobResult.selectedDocumentIds)
+    ? sourceJobResult.selectedDocumentIds.length : 0;
+  const sourceCount = typeof sourceJobResult.sourceCount === "number"
+    ? sourceJobResult.sourceCount : null;
+  const materializedCount = typeof sourceJobResult.materializedCount === "number"
+    ? sourceJobResult.materializedCount : null;
   const kind = String(draft?.kind || draft?.lesson_kind || "main");
   const followUp = kind === "remedial" || kind === "advanced";
   const review = useMemo(() => normalizeDraftReview(draft), [draft]);
@@ -302,10 +311,10 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
         <button className="text-button" onClick={() => router.back()}><ArrowLeft size={16} /> Quay lại</button>
         <span className={`review-state ${isPublished ? "published" : approved ? "approved" : "draft"}`}><ShieldCheck size={16} /> {isPublished ? `Đã xuất bản · bản ${revision}` : approved ? `Đã duyệt · bản ${revision}` : `Bản nháp · bản ${revision}`}</span>
         <div>
-          {!isPublished && rejected.size > 0 && (!markerBankOnly || !review.masteryProblems.some((problem) => rejected.has(problem.id))) && <button className="secondary-button" onClick={() => regenerate.mutate()} disabled={reviewMutationPending}>{regenerate.isPending ? <CircleNotch className="animate-spin" size={16} /> : <ArrowsClockwise size={16} />} Soạn lại {rejected.size} câu</button>}
-          {!isPublished && markerBankOnly && poolDeficitCount > 0 && <button className="secondary-button" onClick={() => router.push("/teacher/documents")} disabled={reviewMutationPending}>Duyệt thêm bài gốc</button>}
-          {!isPublished && markerBankOnly && poolDeficitCount > 0 && generationJobId && <button className="secondary-button" onClick={() => retryMarkerPool.mutate()} disabled={reviewMutationPending}>{retryMarkerPool.isPending ? <CircleNotch className="animate-spin" size={16} /> : <ArrowsClockwise size={16} />} Thử lại từ bài gốc</button>}
-          {!isPublished && !markerBankOnly && poolDeficitCount > 0 && <button className="secondary-button" onClick={() => completePool.mutate()} disabled={reviewMutationPending}>{completePool.isPending ? <CircleNotch className="animate-spin" size={16} /> : <ArrowsClockwise size={16} />} Bù {poolDeficitCount} bài còn thiếu</button>}
+          {!isPublished && rejected.size > 0 && (!reviewedSourcesOnly || !review.masteryProblems.some((problem) => rejected.has(problem.id))) && <button className="secondary-button" onClick={() => regenerate.mutate()} disabled={reviewMutationPending}>{regenerate.isPending ? <CircleNotch className="animate-spin" size={16} /> : <ArrowsClockwise size={16} />} Soạn lại {rejected.size} câu</button>}
+          {!isPublished && reviewedSourcesOnly && poolDeficitCount > 0 && <button className="secondary-button" onClick={() => router.push("/teacher/documents")} disabled={reviewMutationPending}>Kiểm tra bài nguồn</button>}
+          {!isPublished && reviewedSourcesOnly && poolDeficitCount > 0 && generationJobId && <button className="secondary-button" onClick={() => retryMarkerPool.mutate()} disabled={reviewMutationPending}>{retryMarkerPool.isPending ? <CircleNotch className="animate-spin" size={16} /> : <ArrowsClockwise size={16} />} {mixedSources ? "Tìm lại từ nguồn và kho" : "Thử lại từ bài gốc"}</button>}
+          {!isPublished && !reviewedSourcesOnly && poolDeficitCount > 0 && <button className="secondary-button" onClick={() => completePool.mutate()} disabled={reviewMutationPending}>{completePool.isPending ? <CircleNotch className="animate-spin" size={16} /> : <ArrowsClockwise size={16} />} Bù {poolDeficitCount} bài còn thiếu</button>}
           {!isPublished && !approved && <button className="secondary-button" onClick={() => approve.mutate()} disabled={reviewMutationPending || !hasCompleteArc || rejected.size > 0}>{approve.isPending ? <CircleNotch className="animate-spin" size={16} /> : <Check size={16} />} Duyệt arc sẵn sàng</button>}
           {!followUp && <button className="secondary-button" disabled={pdfDisabled || pdfArtifactQuery.isLoading} onClick={handlePdfAction}>{pdfGenerating ? <CircleNotch className="animate-spin" size={16} /> : pdfArtifact?.status === "READY" ? <ArrowSquareOut size={16} /> : <FilePdf size={16} />} {pdfGenerating ? "Đang tạo" : pdfArtifact?.status === "READY" ? "Bản học sinh" : pdfArtifact?.status === "FAILED" ? "Thử lại PDF HS" : "Xuất PDF HS"}</button>}
           {!followUp && <button className="secondary-button" disabled={pdfDisabled || teacherPdfArtifactQuery.isLoading} onClick={handleTeacherPdfAction}>{teacherPdfGenerating ? <CircleNotch className="animate-spin" size={16} /> : teacherPdfArtifact?.status === "READY" ? <ArrowSquareOut size={16} /> : <FilePdf size={16} />} {teacherPdfGenerating ? "Đang tạo" : teacherPdfArtifact?.status === "READY" ? "Bản giáo viên" : teacherPdfArtifact?.status === "FAILED" ? "Thử lại PDF GV" : "Xuất PDF GV"}</button>}
@@ -314,6 +323,7 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
       </header>
 
       {isPublished && <div className="published-review-notice" role="status"><CheckCircle size={22} weight="fill" /><div><strong>Bài học đã được xuất bản</strong><p>Đây là bản nội dung giáo viên đã duyệt và gửi cho học sinh.</p></div></div>}
+      {!isPublished && mixedSources && sourceDocumentCount > 0 && sourceCount !== null && materializedCount !== null && materializedCount < Math.max(sourceCount, 1) && <div className="draft-source-notice" role="status"><WarningCircle size={21} /><div><strong>Nguồn Marker còn bài chưa sẵn sàng</strong><p>Hệ thống nhận diện {sourceCount} bài nguồn trong {sourceDocumentCount} tài liệu; {materializedCount} bài phù hợp đã chuẩn bị vào kho. Bài chưa xác minh hoặc không khớp kỹ năng không được chọn. <button type="button" onClick={() => router.push("/teacher/documents")}>Mở Kho tài liệu</button></p></div></div>}
 
       <div className="draft-review-shell">
         <nav className="draft-review-toc" aria-label="Mục lục bản nháp">
