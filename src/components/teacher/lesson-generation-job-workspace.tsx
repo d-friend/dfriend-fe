@@ -76,7 +76,10 @@ export function LessonGenerationJobWorkspace({ jobId }: { jobId: string }) {
             replaceStoredLessonGenerationJob(activeJobId);
           }
           setRetryableFailure(failedJob);
-          setError(getApiErrorMessage(generationError, generationError instanceof Error ? generationError.message : "Không thể tạo bài học."));
+          const message = getApiErrorMessage(generationError, generationError instanceof Error ? generationError.message : "Không thể tạo bài học.");
+          const code = generationError && typeof generationError === "object" && "code" in generationError && typeof generationError.code === "string"
+            ? generationError.code : "";
+          setError(code && !message.includes(code) ? `${message} (${code})` : message);
         }
       });
     return () => {
@@ -144,14 +147,14 @@ export function LessonGenerationJobWorkspace({ jobId }: { jobId: string }) {
           {Boolean(partial.selectedDocumentIds?.length) && typeof partial.sourceCount === "number" && typeof partial.materializedCount === "number" && partial.materializedCount < Math.max(partial.sourceCount, 1) && <p className="lesson-generation-lead">Nguồn Marker: {partial.materializedCount}/{partial.sourceCount} bài phù hợp đã chuẩn bị vào kho. Kiểm tra đề, hình và đáp án trong Kho tài liệu để bổ sung bài đủ điều kiện.</p>}
           <div className="lesson-generation-actions">
             {Boolean(partial.selectedDocumentIds?.length) && <button className="secondary-button" type="button" onClick={() => router.push("/teacher/documents")}>Kiểm tra bài nguồn</button>}
-            <button
+            {Number(partial.generationCompletedSlots || 0) > 0 && <button
               className="secondary-button"
               type="button"
               disabled={!partialLessonId || !Number.isInteger(partialTaxonomyVersion) || partialTaxonomyVersion < 1}
               onClick={() => router.push(`/teacher/lessons/${encodeURIComponent(partialLessonId)}/review?taxonomyVersion=${partialTaxonomyVersion}&generationJobId=${encodeURIComponent(activeJobId)}`)}
             >
               <BookOpenText size={16} /> Review bản hiện tại
-            </button>
+            </button>}
             {partial.retryAllowed !== false && (
               <button className="primary-button" type="button" onClick={retryMissing}>
                 {!hasKnowledge ? "Thử tạo lại kiến thức" : masteryRetryExhausted ? "Thử tạo lại bài tập" : "Tạo tiếp phần còn thiếu"}
