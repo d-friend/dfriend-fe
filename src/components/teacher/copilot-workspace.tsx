@@ -456,11 +456,11 @@ function LessonPlanCard({ plan, classId }: { plan: CopilotLessonPlan; classId: s
             title={!classId ? "Chọn một lớp ở mục Ngữ cảnh trước khi soạn bài" : undefined}
           >
             <Check size={16} weight="bold" />
-            {requiresGenerationConsent ? "Cho phép AI soạn phần thiếu" : "Đúng rồi, soạn bài"}
+            {requiresGenerationConsent ? "Kiểm tra Marker, rồi cho phép AI nếu cần" : "Đúng rồi, soạn bài"}
           </button>
         )}
       </div>
-      {requiresGenerationConsent && <p className="lesson-plan-consent"><WarningCircle size={16} /> {consentDetail || "Một số kỹ năng chưa có nguồn bài. AI chỉ soạn phần thiếu sau khi bạn xác nhận."}</p>}
+      {requiresGenerationConsent && <p className="lesson-plan-consent"><WarningCircle size={16} /> {consentDetail || "Một số kỹ năng chưa có bài sẵn."} Hệ thống sẽ kiểm tra tài liệu Marker đã trích xuất trước; chỉ dùng AI khi không có tài liệu phù hợp.</p>}
       {plan.confirmable === true && !classId && <p className="lesson-plan-hint">Chọn một lớp ở mục Ngữ cảnh để tiếp tục.</p>}
       {confirm.isError && !generationConsentRequirement(confirm.error) && <p className="message-error"><WarningCircle size={16} /> {getApiErrorMessage(confirm.error, "Chưa thể tạo bản nháp từ kế hoạch này.")}</p>}
     </section>
