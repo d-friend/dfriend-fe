@@ -198,27 +198,23 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
     const missingSlotIds = matrix?.slots
       .filter((slot) => !slot.problem_id || !problemByBankId.has(slot.problem_id))
       .map((slot) => slot.slot_id);
-    const hasOriginForEveryProblem = reviewWithAssets.masteryProblems.every((problem) => Boolean(problem.origin));
-    const generatedProblemIds = new Set(reviewWithAssets.masteryProblems
-      .filter((problem) => problem.origin === "ai_generated")
-      .map((problem) => String(problem.source?.bank_problem_id || problem.id)));
-    const generatedSlotIds = hasOriginForEveryProblem ? matrix?.slots
-      .filter((slot) => Boolean(slot.problem_id && generatedProblemIds.has(slot.problem_id)))
-      .map((slot) => slot.slot_id) : undefined;
+    const originCounts = asRecord(blueprint?.origin_counts);
+    const generatedCount = matrix && typeof originCounts?.ai_generated === "number"
+      ? originCounts.ai_generated : undefined;
     return normalizeContentNotices(draft?.mastery_notices ?? draft?.masteryNotices)
       .map((notice) => notice.code === "mastery_slots_missing" && missingSlotIds
         ? { ...notice, slotIds: missingSlotIds }
-        : (notice.code === "ai_fallback_used" || notice.code === "pool_completed_by_generation") && generatedSlotIds
-          ? { ...notice, slotIds: generatedSlotIds }
+        : (notice.code === "ai_fallback_used" || notice.code === "pool_completed_by_generation") && generatedCount !== undefined
+          ? { ...notice, count: generatedCount }
         : notice)
       .filter((notice) => {
         if (notice.code === "mastery_slots_missing") return notice.slotIds.length > 0;
-        if ((notice.code === "ai_fallback_used" || notice.code === "pool_completed_by_generation") && generatedSlotIds) {
-          return notice.slotIds.length > 0;
+        if ((notice.code === "ai_fallback_used" || notice.code === "pool_completed_by_generation") && generatedCount !== undefined) {
+          return notice.count > 0;
         }
         return true;
       });
-  }, [draft, matrix, problemByBankId, reviewWithAssets.masteryProblems]);
+  }, [draft, matrix, problemByBankId, blueprint]);
   const hasCompleteArc = matrix ? completeArcIds.length > 0 : poolDeficitCount === 0;
   const contentWithoutMastery: DraftReviewModel = useMemo(
     () => ({ ...reviewWithAssets, masteryProblems: matrix ? [] : reviewWithAssets.masteryProblems }),
@@ -363,7 +359,7 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
           {(error || blockers.length > 0) && <div className="publish-blockers"><WarningCircle size={22} /><div><strong>{error}</strong>{blockers.map((item, index) => <p key={index}>{blockerLabel(item)}</p>)}</div></div>}
           {signedAssets.isError ? <div className="publish-blockers" role="alert"><WarningCircle size={22} /><div><strong>Chưa tải được hình trong bản nháp.</strong><p>{getApiErrorMessage(signedAssets.error, "Hãy tải lại hình trước khi duyệt bài.")}</p><button type="button" onClick={() => void signedAssets.refetch()}>Tải lại hình</button></div></div> : null}
           {failedReviewAssets.size > 0 && !signedAssets.isError ? <div className="publish-blockers" role="alert"><WarningCircle size={22} /><div><strong>Hình trong bản nháp chưa hiển thị được.</strong><button type="button" onClick={() => { attemptedAssetRefresh.current.clear(); void signedAssets.refetch(); }}>Tải lại hình</button></div></div> : null}
-          {notices.length > 0 && <div className="publish-blockers" role="status"><WarningCircle size={22} /><div><strong>Nguồn bài và fallback</strong>{notices.map((notice, index) => <p key={`${notice.code}:${index}`}><b>{noticeLabel(notice.code)}</b>: {notice.detail || "Hãy kiểm tra các bài được đánh dấu trước khi xuất bản."}{notice.slotIds.length ? ` (${notice.slotIds.length} slot)` : ""}</p>)}</div></div>}
+          {notices.length > 0 && <div className="publish-blockers" role="status"><WarningCircle size={22} /><div><strong>Nguồn bài và fallback</strong>{notices.map((notice, index) => <p key={`${notice.code}:${index}`}><b>{noticeLabel(notice.code)}</b>: {notice.detail || "Hãy kiểm tra các bài được đánh dấu trước khi xuất bản."}{(notice.code === "ai_fallback_used" || notice.code === "pool_completed_by_generation" ? notice.count : notice.slotIds.length) ? ` (${notice.code === "ai_fallback_used" || notice.code === "pool_completed_by_generation" ? notice.count : notice.slotIds.length} slot)` : ""}</p>)}</div></div>}
           {completePool.data?.failed_slots?.length ? <div className="publish-blockers"><WarningCircle size={22} /><div><strong>Một số slot chưa bù được</strong>{completePool.data.failed_slots.map((slot) => <p key={slot.slot_id}>{slot.slot_id}: {slot.reason}</p>)}</div></div> : null}
           {hasNonMasteryContent || !matrix ? <DraftReviewContent review={contentWithoutMastery} rejected={rejected} guidance={regenerationGuidance} onToggle={toggleRejected} onGuidanceChange={updateRegenerationGuidance} readOnly={isPublished} onAssetError={refreshFailedAsset} onAssetLoad={markAssetLoaded} /> : null}
           {matrix ? <MasteryArcMatrix matrix={matrix} problems={problemByBankId} completeArcIds={completeArcIds} rejected={rejected} guidance={regenerationGuidance} onToggle={toggleRejected} onGuidanceChange={updateRegenerationGuidance} kind={kind} readOnly={isPublished} onAssetError={refreshFailedAsset} onAssetLoad={markAssetLoaded} /> : null}
@@ -601,6 +597,7 @@ function normalizeContentNotices(value: unknown) {
     code: String(item.code || "content_notice"),
     detail: typeof item.detail === "string" ? item.detail : "",
     slotIds: Array.isArray(item.slot_ids) ? item.slot_ids.filter((id): id is string => typeof id === "string") : [],
+    count: typeof item.count === "number" ? item.count : 0,
   }));
 }
 
