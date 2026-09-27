@@ -94,6 +94,11 @@ export const studentApi = {
         params: { taxonomyVersion },
       })
     ).data,
+  markerPublishedAssetAccess: async (publicationId: string, bankProblemId: string, assetId: string) =>
+    (await apiClient.post<{ asset_id: string; content_hash: string; access_url: string; expires_at: string }>(
+      `/published-marker-assets/${encodeURIComponent(publicationId)}/access`,
+      { bankProblemId, assetId },
+    )).data,
   startSession: async (lessonId: string, taxonomyVersion: number, reset = false) =>
     (
       await apiClient.post<StudySession>("/ai-session/start", {

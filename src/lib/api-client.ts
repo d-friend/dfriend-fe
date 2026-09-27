@@ -30,6 +30,37 @@ import type {
 
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "/api";
 
+export type MarkerSourceExercise = {
+  exercise_id: string;
+  document_id: string;
+  source_label?: string | null;
+  source_order: number;
+  task_shape: "single_stem" | "multiple_choice" | "multi_part" | "mixed";
+  stem: string;
+  content_hash: string;
+  fidelity_status: "pending" | "needs_review" | "verified";
+  runtime_support_status: "supported" | "requires_preparation" | "unsupported_task_type";
+  issues: string[];
+  source_answer?: Array<{ content: string }> | null;
+  source_solution?: Array<{ content: string }> | null;
+  assets: Array<{
+    asset_id: string;
+    target: "stem" | "part" | "choice" | "solution";
+    audience: "public_problem" | "private_solution";
+    required_for_answer: boolean;
+    order: number;
+  }>;
+};
+
+export type MarkerPreparedGeometry = {
+  source_exercise_id: string;
+  source_content_hash: string;
+  final_answer: string;
+  solution: string;
+  visual_facts: Array<{ asset_id: string; fact: string }>;
+  approach_list: Array<{ summary: string }>;
+};
+
 function readCookie(name: string) {
   if (typeof document === "undefined") return null;
   const row = document.cookie
@@ -71,7 +102,11 @@ apiClient.interceptors.response.use(
 export function getApiErrorMessage(error: unknown, fallback = "Không thể hoàn tất yêu cầu.") {
   if (!axios.isAxiosError<ApiErrorEnvelope>(error)) return fallback;
   const message = error.response?.data?.message;
-  return Array.isArray(message) ? message.join(" ") : message || fallback;
+  if (Array.isArray(message)) {
+    const descriptions = message.map((item) => typeof item === "string" ? item : item.msg || item.detail || "").filter(Boolean);
+    return descriptions.join(" ") || fallback;
+  }
+  return message || fallback;
 }
 
 export function isApiErrorStatus(error: unknown, status: number) {
@@ -397,6 +432,53 @@ export const teacherApi = {
     (await apiClient.post<{ documentId: string; indexStatus: string }>(`/exercises/documents/${documentId}/retry-index`, undefined, { params: { taxonomyVersion } })).data,
   extractStoredDocumentWithMarker: async (documentId: string, taxonomyVersion: number) =>
     (await apiClient.post<{ documentId: string; extractionJobId: string; extractionStatus: string }>(`/exercises/documents/${documentId}/extract-marker`, undefined, { params: { taxonomyVersion } })).data,
+  markerSourceExercises: async (documentId: string, taxonomyVersion: number) =>
+    (await apiClient.get<{ sources: MarkerSourceExercise[] }>(
+      `/exercises/documents/${encodeURIComponent(documentId)}/source-exercises`,
+      { params: { taxonomyVersion } },
+    )).data.sources,
+  processMarkerSourceExercises: async (documentId: string, taxonomyVersion: number) =>
+    (await apiClient.post<{
+      sources: MarkerSourceExercise[];
+      waiting_document_ids: string[];
+      failed_document_ids: string[];
+      review_required_document_ids: string[];
+      batch_yielded_document_ids: string[];
+      coverage_by_document: Record<string, { groups_total: number;
+        groups_saved: number; groups_needs_review: number;
+        groups_unsupported_shape: number; unresolved_blocks: number }>;
+    }>(
+      `/exercises/documents/${encodeURIComponent(documentId)}/source-exercises/process`,
+      { taxonomyVersion }, { timeout: 120_000 },
+    )).data,
+  markerSourceAssetAccess: async (documentId: string, exerciseId: string, assetId: string, taxonomyVersion: number, expectedContentHash: string) =>
+    (await apiClient.post<{ access_url: string; expires_at: string }>(
+      "/exercises/source-assets/access",
+      { documentId, exerciseId, assetId, taxonomyVersion, expectedContentHash },
+    )).data,
+  markerDraftAssetAccess: async (lessonId: string, bankProblemId: string, assetId: string, taxonomyVersion: number) =>
+    (await apiClient.post<{ asset_id: string; content_hash: string; access_url: string; expires_at: string }>(
+      `/exercises/ai-drafts/${encodeURIComponent(lessonId)}/assets/access`,
+      { bankProblemId, assetId, taxonomyVersion },
+    )).data,
+  verifyMarkerSourceExercise: async (documentId: string, exerciseId: string, expectedContentHash: string, taxonomyVersion: number) =>
+    (await apiClient.post<{ source: MarkerSourceExercise }>(
+      `/exercises/documents/${encodeURIComponent(documentId)}/source-exercises/${encodeURIComponent(exerciseId)}/verify`,
+      { expectedContentHash, taxonomyVersion },
+    )).data.source,
+  prepareMarkerSourceExercise: async (documentId: string, exerciseId: string, taxonomyVersion: number) =>
+    (await apiClient.post<{ prepared: MarkerPreparedGeometry }>(
+      `/exercises/documents/${encodeURIComponent(documentId)}/source-exercises/${encodeURIComponent(exerciseId)}/prepare`,
+      { taxonomyVersion }, { timeout: 120_000 },
+    )).data.prepared,
+  materializeMarkerSourceExercise: async (
+    documentId: string, exerciseId: string, taxonomyVersion: number,
+    expectedContentHash: string, primarySkillId: string,
+    recommendedProblemRole: "reinforcement" | "challenge" | "exploration" | "extension",
+  ) => (await apiClient.post<{ problem: { bank_problem_id: string } }>(
+    `/exercises/documents/${encodeURIComponent(documentId)}/source-exercises/${encodeURIComponent(exerciseId)}/materialize`,
+    { taxonomyVersion, expectedContentHash, primarySkillId, recommendedProblemRole },
+  )).data.problem,
   precheckLesson: async (payload: {
     lessonGoal?: string;
     title: string;

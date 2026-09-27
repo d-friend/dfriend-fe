@@ -4,7 +4,16 @@ export type LessonGenerationResult = Record<string, unknown> & {
   lessonId?: string;
   taxonomyVersion?: number;
   problemCount?: number;
-  generationStatus?: "complete" | "partial_ready" | "partial_blocked" | "partial" | null;
+  generationStatus?: "complete" | "partial_ready" | "partial_blocked" | "partial" |
+    "waiting_for_extraction" | "source_processing" | "processing_source" |
+    "source_review_required" | "source_failed" | null;
+  selectedDocumentIds?: string[];
+  sourceDocumentId?: string;
+  sourceWaitKind?: string;
+  sourceCount?: number | null;
+  verifiedCount?: number | null;
+  unsupportedCount?: number | null;
+  materializedCount?: number | null;
   generationCompletedSlots?: number;
   generationTotalSlots?: number;
   generationMissingSlotIds?: string[];
@@ -92,6 +101,12 @@ export async function waitForLessonGeneration(
     const progressData = isRecord(job.progress) ? job.progress : {};
     if (progress === "queued") onStage("Yêu cầu đã vào hàng đợi");
     if (progress === "precheck") onStage("Đang kiểm tra kỹ năng và nguồn bài phù hợp");
+    if (progress === "processing_source" || progress === "source_processing") onStage(
+      progressData.sourceWaitKind === "waiting_for_extraction"
+        ? "Đang chờ Marker trích xuất tài liệu"
+        : "Đang xử lý bài nguồn từ tài liệu Marker",
+    );
+    if (progress === "waiting_for_extraction") onStage("Đang chờ Marker trích xuất tài liệu");
     if (progress === "knowledge") onStage("Đang soạn Session 1 theo kỹ năng và mục tiêu");
     if (progress === "retrying") onStage("Kết nối bị gián đoạn, đang tiếp tục đúng tiến trình đã lưu");
     if (progress === "mastery_retrying" || progressData.retryMode === "mastery_missing_only") {
@@ -112,7 +127,8 @@ export async function waitForLessonGeneration(
       await new Promise((resolve) => window.setTimeout(resolve, 300));
       continue;
     }
-    if (["ready", "partial_ready", "partial_blocked", "partial"].includes(String(job.status)) && isRecord(job.result)) return job.result;
+    if (["ready", "partial_ready", "partial_blocked", "partial", "waiting_for_extraction",
+      "source_review_required", "source_failed", "processing_source", "source_processing"].includes(String(job.status)) && isRecord(job.result)) return job.result;
     if (job.status === "failed") {
       const jobErrorData = isRecord(job.error) ? job.error : {};
       if (jobErrorData.code === "MASTERY_RETRY_EXHAUSTED" && isRecord(job.result)) {

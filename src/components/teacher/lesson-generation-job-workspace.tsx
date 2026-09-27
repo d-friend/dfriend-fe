@@ -18,6 +18,7 @@ export function LessonGenerationJobWorkspace({ jobId }: { jobId: string }) {
   const search = useSearchParams();
   const [detail, setDetail] = useState("Đang kiểm tra tiến trình tạo bài");
   const [partial, setPartial] = useState<LessonGenerationResult | null>(null);
+  const [sourceStage, setSourceStage] = useState<LessonGenerationResult | null>(null);
   const [error, setError] = useState("");
   const [retryableFailure, setRetryableFailure] = useState(false);
   const [activeJobId, setActiveJobId] = useState(jobId);
@@ -46,6 +47,11 @@ export function LessonGenerationJobWorkspace({ jobId }: { jobId: string }) {
           setPartial(result);
           return;
         }
+        if (["waiting_for_extraction", "source_review_required", "source_failed",
+          "processing_source", "source_processing"].includes(String(result.generationStatus))) {
+          setSourceStage(result);
+          return;
+        }
         const lessonId = String(result.lessonId || "");
         const taxonomyVersion = Number(result.taxonomyVersion);
         if (!lessonId || !Number.isInteger(taxonomyVersion) || taxonomyVersion < 1) throw new Error("Backend chưa trả đủ lesson ID và taxonomy version để mở review.");
@@ -64,12 +70,12 @@ export function LessonGenerationJobWorkspace({ jobId }: { jobId: string }) {
       })
       .catch((generationError) => {
         if (!cancelled) {
-          const missingCheckpoint = generationError instanceof Error &&
-            (generationError as Error & { code?: string }).code === "GENERATION_REQUEST_MISMATCH";
-          if (generationError instanceof Error && generationError.name === "LessonGenerationFailed" && !missingCheckpoint) {
+          const failedJob = generationError instanceof Error &&
+            generationError.name === "LessonGenerationFailed";
+          if (failedJob) {
             replaceStoredLessonGenerationJob(activeJobId);
           }
-          setRetryableFailure(missingCheckpoint);
+          setRetryableFailure(failedJob);
           setError(getApiErrorMessage(generationError, generationError instanceof Error ? generationError.message : "Không thể tạo bài học."));
         }
       });
@@ -82,7 +88,8 @@ export function LessonGenerationJobWorkspace({ jobId }: { jobId: string }) {
     setError("");
     setRetryableFailure(false);
     setPartial(null);
-    setDetail(partial?.knowledge ? "Đang tạo các slot còn thiếu" : "Đang tạo lại phần kiến thức và các slot còn thiếu");
+    setSourceStage(null);
+    setDetail(sourceStage ? "Đang tiếp tục xử lý bài nguồn Marker" : partial?.knowledge ? "Đang tạo các slot còn thiếu" : "Đang tạo lại phần kiến thức và các slot còn thiếu");
     try {
       const queued = await teacherApi.retryMissingLessonSlots(activeJobId);
       replaceStoredLessonGenerationJob(activeJobId, queued.jobId);
@@ -95,6 +102,27 @@ export function LessonGenerationJobWorkspace({ jobId }: { jobId: string }) {
       setRetryableFailure(true);
       setError(getApiErrorMessage(retryError, "Chưa thể tạo tiếp các slot còn thiếu."));
     }
+  }
+
+  if (sourceStage) {
+    const status = sourceStage.generationStatus;
+    const waiting = status === "waiting_for_extraction";
+    const failed = status === "source_failed";
+    const processing = status === "processing_source" || status === "source_processing";
+    return <section className="lesson-generation-screen"><div className="lesson-generation-panel">
+      <WarningCircle size={34} />
+      <p className="workspace-kicker">Tài liệu Marker</p>
+      <h1>{waiting ? "Đang chờ trích xuất" : failed ? "Chưa xử lý được tài liệu" : processing ? "Nguồn cần xử lý tiếp" : "Cần duyệt bài nguồn"}</h1>
+      <p className="lesson-generation-lead">{waiting
+        ? "Marker chưa hoàn tất trích xuất. Tiến trình được lưu; hãy tiếp tục sau khi tài liệu sẵn sàng."
+        : failed ? "Nguồn đã báo lỗi xử lý. Kiểm tra tài liệu trong Kho tài liệu trước khi thử lại."
+          : processing ? "Các batch đã hoàn thành được giữ lại. Tiếp tục để xử lý phần nguồn còn lại."
+          : `Đã tìm thấy ${sourceStage.sourceCount ?? "chưa rõ"} bài nguồn; ${sourceStage.verifiedCount ?? "chưa rõ"} bài đã duyệt; ${sourceStage.materializedCount ?? "chưa rõ"} bài đã chuẩn bị và lưu vào kho. Kiểm tra hình, đáp án, chuẩn bị và lưu ít nhất một bài phù hợp trước khi tiếp tục tạo lesson.`}</p>
+      <div className="lesson-generation-actions">
+        <button type="button" className="secondary-button" onClick={() => router.push("/teacher/documents")}>Mở Kho tài liệu</button>
+        <button type="button" className="primary-button" onClick={() => void retryMissing()}>Kiểm tra lại và tiếp tục</button>
+      </div>
+    </div></section>;
   }
 
   if (partial) {

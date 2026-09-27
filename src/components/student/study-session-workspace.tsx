@@ -224,6 +224,29 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
       automaticImageRefreshes.current.add(refreshKey);
     }
     try {
+      const sourceProblem = session.problems?.find((item) => item.problem_id === problemId);
+      if (sourceProblem?.bank_problem_id && sourceProblem.assets?.length) {
+        const requestedAssets = failedAsset ? [failedAsset] : sourceProblem.assets;
+        const signed = await Promise.all(requestedAssets.map(async (asset) => {
+          const result = await studentApi.markerPublishedAssetAccess(lessonId, sourceProblem.bank_problem_id!, asset.asset_id);
+          if (result.asset_id !== asset.asset_id || result.content_hash !== asset.content_hash) {
+            throw new Error("Hình của bài tập không khớp với bản đã xuất bản.");
+          }
+          return result;
+        }));
+        const byId = new Map(signed.map((asset) => [asset.asset_id, asset]));
+        setSession((current) => {
+          if (current?.session_id !== currentSessionId) return current;
+          return { ...current, problems: current.problems?.map((problem) => problem.problem_id === problemId
+            ? { ...problem, assets: problem.assets?.map((asset) => {
+              const replacement = byId.get(asset.asset_id);
+              return replacement ? { ...asset, access_url: replacement.access_url, expires_at: replacement.expires_at } : asset;
+            }) }
+            : problem) };
+        });
+        setSessionError("");
+        return;
+      }
       const fresh = await studentApi.activeSession(lessonId, taxonomyVersion);
       if (fresh.session_id !== currentSessionId) return;
       const freshProblem = fresh.problems?.find((item) => item.problem_id === problemId);
@@ -430,7 +453,11 @@ export function StudySessionWorkspace({ lessonId }: { lessonId: string }) {
                             {url ? <button type="button" className="study-problem-image" onClick={() => setExpandedAssetKey(key)} aria-label="Mở hình lớn">
                               {/* Private signed URLs must load directly in the browser. */}
                               {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img src={url} width={asset.width} height={asset.height} alt={asset.alt_text || "Hình của đề bài"} onLoad={(event) => setDecodedAssets((current) => ({ ...current, [key]: event.currentTarget.naturalWidth > 0 && event.currentTarget.naturalHeight > 0 }))} onError={() => { setDecodedAssets((current) => ({ ...current, [key]: false })); void refreshProblemImages(currentProblem.problem_id, asset); }} />
+                              <img src={url} width={asset.width} height={asset.height} alt={asset.alt_text || "Hình của đề bài"} onLoad={(event) => {
+                                // React clears currentTarget after the event callback returns.
+                                const decoded = event.currentTarget.naturalWidth > 0 && event.currentTarget.naturalHeight > 0;
+                                setDecodedAssets((current) => ({ ...current, [key]: decoded }));
+                              }} onError={() => { setDecodedAssets((current) => ({ ...current, [key]: false })); void refreshProblemImages(currentProblem.problem_id, asset); }} />
                               <span>Chạm để mở hình lớn</span>
                             </button> : <span className="study-asset-unavailable">Chưa tải được hình</span>}
                           </div>;

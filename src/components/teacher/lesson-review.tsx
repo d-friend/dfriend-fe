@@ -3,7 +3,7 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { ArrowLeft, ArrowSquareOut, ArrowsClockwise, Check, CheckCircle, CircleNotch, FilePdf, ShieldCheck, WarningCircle } from "@phosphor-icons/react";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { getApiErrorMessage, teacherApi } from "@/lib/api-client";
 import { skillDisplayName } from "@/lib/skill-labels";
 import {
@@ -14,6 +14,7 @@ import {
   type DraftReviewModel,
   type ProblemView,
   type RegenerationGuidance,
+  type TeacherProblemAsset,
 } from "@/components/teacher/lesson-authoring";
 
 type BlueprintSlot = {
@@ -48,6 +49,8 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
   const [rejected, setRejected] = useState<Set<string>>(new Set());
   const [regenerationGuidance, setRegenerationGuidance] = useState<Record<string, RegenerationGuidance>>({});
   const [error, setError] = useState("");
+  const [failedReviewAssets, setFailedReviewAssets] = useState<Set<string>>(new Set());
+  const attemptedAssetRefresh = useRef<Set<string>>(new Set());
   const [blockers, setBlockers] = useState<Array<Record<string, unknown>>>([]);
   const [published, setPublished] = useState(false);
   const [titleOverride, setTitleOverride] = useState<string | null>(null);
@@ -76,9 +79,63 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
   const classes = useQuery({ queryKey: ["teacher", "classes"], queryFn: teacherApi.classes });
   const draft = draftQuery.data;
   const isPublished = published || draft?.status === "published" || Boolean(draft?.published_at);
+  const markerBankOnly = draft?.exercise_source_policy === "bank_only";
   const kind = String(draft?.kind || draft?.lesson_kind || "main");
   const followUp = kind === "remedial" || kind === "advanced";
   const review = useMemo(() => normalizeDraftReview(draft), [draft]);
+  const reviewAssets = useMemo(() => review.masteryProblems.flatMap((problem) => {
+    const bankProblemId = problem.source?.bank_problem_id;
+    const metadata = problem.source?.metadata;
+    if (typeof bankProblemId !== "string" || !bankProblemId ||
+        !metadata || typeof metadata !== "object" || Array.isArray(metadata) ||
+        !("marker_extraction" in metadata)) return [];
+    return (problem.assets || [])
+      .filter((asset) => asset.audience === "public_problem" && ["stem", "choice"].includes(asset.target))
+      .map((asset) => ({ bankProblemId, assetId: asset.asset_id, contentHash: asset.content_hash }));
+  }), [review.masteryProblems]);
+  const signedAssets = useQuery({
+    queryKey: ["teacher", "draft", lessonId, "marker-assets", taxonomyVersion, Number(draft?.revision || 1), reviewAssets],
+    queryFn: async () => {
+      const signed = await Promise.all(reviewAssets.map(async (asset) => {
+        const result = await teacherApi.markerDraftAssetAccess(lessonId, asset.bankProblemId, asset.assetId, taxonomyVersion);
+        if (result.content_hash !== asset.contentHash || result.asset_id !== asset.assetId) {
+          throw new Error("Hình trong bản nháp không khớp với tài liệu đã trích xuất.");
+        }
+        return [`${asset.bankProblemId}:${asset.assetId}:${asset.contentHash}`, result.access_url] as const;
+      }));
+      return new Map(signed);
+    },
+    enabled: Boolean(draft) && Number.isInteger(taxonomyVersion) && taxonomyVersion > 0 && reviewAssets.length > 0,
+    staleTime: 10 * 60 * 1000,
+    refetchInterval: 10 * 60 * 1000,
+  });
+  function refreshFailedAsset(asset: TeacherProblemAsset) {
+    const key = `${asset.asset_id}:${asset.content_hash}`;
+    setFailedReviewAssets((current) => new Set(current).add(key));
+    if (attemptedAssetRefresh.current.has(key)) return;
+    attemptedAssetRefresh.current.add(key);
+    void signedAssets.refetch();
+  }
+  function markAssetLoaded(asset: TeacherProblemAsset) {
+    const key = `${asset.asset_id}:${asset.content_hash}`;
+    setFailedReviewAssets((current) => {
+      if (!current.has(key)) return current;
+      const next = new Set(current);
+      next.delete(key);
+      return next;
+    });
+  }
+  const reviewWithAssets = useMemo<DraftReviewModel>(() => ({
+    ...review,
+    masteryProblems: review.masteryProblems.map((problem) => {
+      const bankProblemId = problem.source?.bank_problem_id;
+      if (typeof bankProblemId !== "string" || !problem.assets?.length) return problem;
+      return { ...problem, assets: problem.assets.map((asset) => ({
+        ...asset,
+        access_url: signedAssets.data?.get(`${bankProblemId}:${asset.asset_id}:${asset.content_hash}`) || null,
+      })) };
+    }),
+  }), [review, signedAssets.data]);
   const suggestedTitle = String(draft?.title || draft?.lesson_title || draft?.lesson_goal_raw || "Bản nháp từ Copilot");
   const title = titleOverride ?? suggestedTitle;
   const goal = String(draft?.lesson_goal_raw || draft?.goal_text || "Review nội dung trước khi xuất bản.");
@@ -116,11 +173,11 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
   const blueprint = asRecord(draft?.mastery_blueprint ?? draft?.masteryBlueprint);
   const matrix = useMemo(() => buildBlueprintModel(blueprint), [blueprint]);
   const problemByBankId = useMemo(() => {
-    const entries = review.masteryProblems
+    const entries = reviewWithAssets.masteryProblems
       .map((problem) => [String(problem.source?.bank_problem_id || ""), problem] as const)
       .filter(([id]) => Boolean(id));
     return new Map(entries);
-  }, [review.masteryProblems]);
+  }, [reviewWithAssets.masteryProblems]);
   const completeArcIds = useMemo(
     () => completeBlueprintArcIds(matrix, problemByBankId),
     [matrix, problemByBankId],
@@ -134,8 +191,8 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
     : 0;
   const hasCompleteArc = matrix ? completeArcIds.length > 0 : poolDeficitCount === 0;
   const contentWithoutMastery: DraftReviewModel = useMemo(
-    () => ({ ...review, masteryProblems: matrix ? [] : review.masteryProblems }),
-    [matrix, review],
+    () => ({ ...reviewWithAssets, masteryProblems: matrix ? [] : reviewWithAssets.masteryProblems }),
+    [matrix, reviewWithAssets],
   );
   const hasNonMasteryContent = contentWithoutMastery.knowledgeSections.length > 0 || contentWithoutMastery.knowledgeProblems.length > 0 || contentWithoutMastery.masteryProblems.length > 0;
 
@@ -159,6 +216,11 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
     mutationFn: () => teacherApi.completeLessonReviewPool(lessonId, revision, taxonomyVersion),
     onSuccess: async () => { setError(""); setBlockers([]); await draftQuery.refetch(); },
     onError: async (completionError) => { setError(getApiErrorMessage(completionError, "Không thể bù bài còn thiếu.")); await draftQuery.refetch(); },
+  });
+  const retryMarkerPool = useMutation({
+    mutationFn: () => teacherApi.retryMissingLessonSlots(generationJobId),
+    onSuccess: (job) => router.push(`/teacher/lessons/generating/${encodeURIComponent(job.jobId)}?origin=wizard`),
+    onError: (retryError) => setError(getApiErrorMessage(retryError, "Chưa thể tạo tiếp từ bài gốc đã duyệt.")),
   });
   const exportPdf = useMutation({
     mutationFn: () => teacherApi.generateLessonPdf(lessonId, revision, taxonomyVersion),
@@ -200,6 +262,7 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
     approve.isPending ||
     regenerate.isPending ||
     completePool.isPending ||
+    retryMarkerPool.isPending ||
     exportPdf.isPending ||
     exportTeacherPdf.isPending ||
     publish.isPending;
@@ -239,8 +302,10 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
         <button className="text-button" onClick={() => router.back()}><ArrowLeft size={16} /> Quay lại</button>
         <span className={`review-state ${isPublished ? "published" : approved ? "approved" : "draft"}`}><ShieldCheck size={16} /> {isPublished ? `Đã xuất bản · bản ${revision}` : approved ? `Đã duyệt · bản ${revision}` : `Bản nháp · bản ${revision}`}</span>
         <div>
-          {!isPublished && rejected.size > 0 && <button className="secondary-button" onClick={() => regenerate.mutate()} disabled={reviewMutationPending}>{regenerate.isPending ? <CircleNotch className="animate-spin" size={16} /> : <ArrowsClockwise size={16} />} Soạn lại {rejected.size} câu</button>}
-          {!isPublished && poolDeficitCount > 0 && <button className="secondary-button" onClick={() => completePool.mutate()} disabled={reviewMutationPending}>{completePool.isPending ? <CircleNotch className="animate-spin" size={16} /> : <ArrowsClockwise size={16} />} Bù {poolDeficitCount} bài còn thiếu</button>}
+          {!isPublished && rejected.size > 0 && (!markerBankOnly || !review.masteryProblems.some((problem) => rejected.has(problem.id))) && <button className="secondary-button" onClick={() => regenerate.mutate()} disabled={reviewMutationPending}>{regenerate.isPending ? <CircleNotch className="animate-spin" size={16} /> : <ArrowsClockwise size={16} />} Soạn lại {rejected.size} câu</button>}
+          {!isPublished && markerBankOnly && poolDeficitCount > 0 && <button className="secondary-button" onClick={() => router.push("/teacher/documents")} disabled={reviewMutationPending}>Duyệt thêm bài gốc</button>}
+          {!isPublished && markerBankOnly && poolDeficitCount > 0 && generationJobId && <button className="secondary-button" onClick={() => retryMarkerPool.mutate()} disabled={reviewMutationPending}>{retryMarkerPool.isPending ? <CircleNotch className="animate-spin" size={16} /> : <ArrowsClockwise size={16} />} Thử lại từ bài gốc</button>}
+          {!isPublished && !markerBankOnly && poolDeficitCount > 0 && <button className="secondary-button" onClick={() => completePool.mutate()} disabled={reviewMutationPending}>{completePool.isPending ? <CircleNotch className="animate-spin" size={16} /> : <ArrowsClockwise size={16} />} Bù {poolDeficitCount} bài còn thiếu</button>}
           {!isPublished && !approved && <button className="secondary-button" onClick={() => approve.mutate()} disabled={reviewMutationPending || !hasCompleteArc || rejected.size > 0}>{approve.isPending ? <CircleNotch className="animate-spin" size={16} /> : <Check size={16} />} Duyệt arc sẵn sàng</button>}
           {!followUp && <button className="secondary-button" disabled={pdfDisabled || pdfArtifactQuery.isLoading} onClick={handlePdfAction}>{pdfGenerating ? <CircleNotch className="animate-spin" size={16} /> : pdfArtifact?.status === "READY" ? <ArrowSquareOut size={16} /> : <FilePdf size={16} />} {pdfGenerating ? "Đang tạo" : pdfArtifact?.status === "READY" ? "Bản học sinh" : pdfArtifact?.status === "FAILED" ? "Thử lại PDF HS" : "Xuất PDF HS"}</button>}
           {!followUp && <button className="secondary-button" disabled={pdfDisabled || teacherPdfArtifactQuery.isLoading} onClick={handleTeacherPdfAction}>{teacherPdfGenerating ? <CircleNotch className="animate-spin" size={16} /> : teacherPdfArtifact?.status === "READY" ? <ArrowSquareOut size={16} /> : <FilePdf size={16} />} {teacherPdfGenerating ? "Đang tạo" : teacherPdfArtifact?.status === "READY" ? "Bản giáo viên" : teacherPdfArtifact?.status === "FAILED" ? "Thử lại PDF GV" : "Xuất PDF GV"}</button>}
@@ -265,10 +330,12 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
             <p>{goal}</p>
           </header>
           {(error || blockers.length > 0) && <div className="publish-blockers"><WarningCircle size={22} /><div><strong>{error}</strong>{blockers.map((item, index) => <p key={index}>{blockerLabel(item)}</p>)}</div></div>}
+          {signedAssets.isError ? <div className="publish-blockers" role="alert"><WarningCircle size={22} /><div><strong>Chưa tải được hình trong bản nháp.</strong><p>{getApiErrorMessage(signedAssets.error, "Hãy tải lại hình trước khi duyệt bài.")}</p><button type="button" onClick={() => void signedAssets.refetch()}>Tải lại hình</button></div></div> : null}
+          {failedReviewAssets.size > 0 && !signedAssets.isError ? <div className="publish-blockers" role="alert"><WarningCircle size={22} /><div><strong>Hình trong bản nháp chưa hiển thị được.</strong><button type="button" onClick={() => { attemptedAssetRefresh.current.clear(); void signedAssets.refetch(); }}>Tải lại hình</button></div></div> : null}
           {notices.length > 0 && <div className="publish-blockers" role="status"><WarningCircle size={22} /><div><strong>Nguồn bài và fallback</strong>{notices.map((notice, index) => <p key={`${notice.code}:${index}`}><b>{noticeLabel(notice.code)}</b>: {notice.detail || "Hãy kiểm tra các bài được đánh dấu trước khi xuất bản."}{notice.slotIds.length ? ` (${notice.slotIds.length} slot)` : ""}</p>)}</div></div>}
           {completePool.data?.failed_slots?.length ? <div className="publish-blockers"><WarningCircle size={22} /><div><strong>Một số slot chưa bù được</strong>{completePool.data.failed_slots.map((slot) => <p key={slot.slot_id}>{slot.slot_id}: {slot.reason}</p>)}</div></div> : null}
-          {hasNonMasteryContent || !matrix ? <DraftReviewContent review={contentWithoutMastery} rejected={rejected} guidance={regenerationGuidance} onToggle={toggleRejected} onGuidanceChange={updateRegenerationGuidance} readOnly={isPublished} /> : null}
-          {matrix ? <MasteryArcMatrix matrix={matrix} problems={problemByBankId} completeArcIds={completeArcIds} rejected={rejected} guidance={regenerationGuidance} onToggle={toggleRejected} onGuidanceChange={updateRegenerationGuidance} kind={kind} readOnly={isPublished} /> : null}
+          {hasNonMasteryContent || !matrix ? <DraftReviewContent review={contentWithoutMastery} rejected={rejected} guidance={regenerationGuidance} onToggle={toggleRejected} onGuidanceChange={updateRegenerationGuidance} readOnly={isPublished} onAssetError={refreshFailedAsset} onAssetLoad={markAssetLoaded} /> : null}
+          {matrix ? <MasteryArcMatrix matrix={matrix} problems={problemByBankId} completeArcIds={completeArcIds} rejected={rejected} guidance={regenerationGuidance} onToggle={toggleRejected} onGuidanceChange={updateRegenerationGuidance} kind={kind} readOnly={isPublished} onAssetError={refreshFailedAsset} onAssetLoad={markAssetLoaded} /> : null}
         </main>
 
         <aside className="draft-review-settings">
@@ -321,6 +388,8 @@ function MasteryArcMatrix({
   onGuidanceChange,
   kind,
   readOnly = false,
+  onAssetError,
+  onAssetLoad,
 }: {
   matrix: BlueprintModel;
   problems: Map<string, ProblemView>;
@@ -331,6 +400,8 @@ function MasteryArcMatrix({
   onGuidanceChange: (id: string, field: keyof RegenerationGuidance, value: string) => void;
   kind: string;
   readOnly?: boolean;
+  onAssetError?: (asset: TeacherProblemAsset) => void;
+  onAssetLoad?: (asset: TeacherProblemAsset) => void;
 }) {
   const firstReadyArc = matrix.arcs.find((arc) => completeArcIds.includes(arc.arc_id));
   const [selectedArcId, setSelectedArcId] = useState(firstReadyArc?.arc_id || matrix.arcs[0]?.arc_id || "");
@@ -416,7 +487,7 @@ function MasteryArcMatrix({
                 </div>
                 <div className="mastery-problem-content">
                   {problem ? (
-                    <DraftProblemList problems={[problem]} rejected={rejected} guidance={guidance} onToggle={onToggle} onGuidanceChange={onGuidanceChange} readOnly={readOnly} />
+                    <DraftProblemList problems={[problem]} rejected={rejected} guidance={guidance} onToggle={onToggle} onGuidanceChange={onGuidanceChange} readOnly={readOnly} onAssetError={onAssetError} onAssetLoad={onAssetLoad} />
                   ) : (
                     <div className="mastery-slot-empty"><WarningCircle size={18} /><span>Chưa có bài cho bước này</span></div>
                   )}
