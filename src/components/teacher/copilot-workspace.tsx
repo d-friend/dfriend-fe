@@ -335,7 +335,7 @@ function LessonPlanCard({ plan, classId }: { plan: CopilotLessonPlan; classId: s
   const [partial, setPartial] = useState<LessonGenerationResult | null>(null);
   const startsWithoutMaterial = plan.verdict === "no_material" || (plan.bankProblems === 0 && plan.documentUnits === 0);
   const [requiresGenerationConsent, setRequiresGenerationConsent] = useState(startsWithoutMaterial);
-  const [consentDetail, setConsentDetail] = useState(startsWithoutMaterial ? plan.detail : "");
+  const [consentDetail, setConsentDetail] = useState("");
   const confirm = useMutation({
     mutationFn: async (allowGenerated: boolean) => {
       const requestId = crypto.randomUUID();
@@ -395,7 +395,9 @@ function LessonPlanCard({ plan, classId }: { plan: CopilotLessonPlan; classId: s
           <strong>{plan.subjectLabel}</strong><i>›</i><strong>{plan.topicLabel}</strong><i>›</i><strong>{plan.conceptLabel}</strong>
         </div>
       </header>
-      <p className="lesson-plan-detail">{plan.detail}</p>
+      <p className="lesson-plan-detail">{startsWithoutMaterial
+        ? "Nguồn trong đề xuất chưa đủ cho kỹ năng đã chọn. Khi xác nhận, hệ thống sẽ kiểm tra tài liệu Marker mới nhất và yêu cầu duyệt bài nguồn nếu cần."
+        : plan.detail}</p>
       {partial && (
         <div className="lesson-plan-consent" role="status">
           <WarningCircle size={16} />
@@ -447,7 +449,7 @@ function LessonPlanCard({ plan, classId }: { plan: CopilotLessonPlan; classId: s
         </div>
       </fieldset>
       <div className="lesson-plan-footer">
-        <p>Ngân hàng: {plan.bankProblems} bài <i>·</i> Tài liệu: {plan.documentUnits} phần</p>
+        <p>Trong đề xuất: Ngân hàng {plan.bankProblems} bài <i>·</i> Tài liệu {plan.documentUnits} phần</p>
         {plan.confirmable === true && (
           <button
             className="primary-button"
@@ -460,7 +462,7 @@ function LessonPlanCard({ plan, classId }: { plan: CopilotLessonPlan; classId: s
           </button>
         )}
       </div>
-      {requiresGenerationConsent && <p className="lesson-plan-consent"><WarningCircle size={16} /> {consentDetail || "Một số kỹ năng chưa có bài sẵn."} Hệ thống sẽ kiểm tra tài liệu Marker đã trích xuất trước; chỉ dùng AI khi không có tài liệu phù hợp.</p>}
+      {requiresGenerationConsent && <p className="lesson-plan-consent"><WarningCircle size={16} /> {consentDetail || "Một số kỹ năng chưa có bài sẵn."} Nếu tài liệu Marker phù hợp chưa có bài được duyệt, bài học sẽ chờ bạn duyệt nguồn. AI chỉ soạn khi không có tài liệu phù hợp.</p>}
       {plan.confirmable === true && !classId && <p className="lesson-plan-hint">Chọn một lớp ở mục Ngữ cảnh để tiếp tục.</p>}
       {confirm.isError && !generationConsentRequirement(confirm.error) && <p className="message-error"><WarningCircle size={16} /> {getApiErrorMessage(confirm.error, "Chưa thể tạo bản nháp từ kế hoạch này.")}</p>}
     </section>
