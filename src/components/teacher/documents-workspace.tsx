@@ -183,7 +183,7 @@ export function DocumentsWorkspace() {
         ? "Một phiên khác đang xử lý tài liệu. Hãy thử lại sau."
         : `Đã lưu ${result.sources.length} bài nguồn.` +
           (coverage ? ` ${coverage.groups_needs_review} nhóm chưa cấu trúc, ${coverage.groups_unsupported_shape} dạng chưa hỗ trợ, ${coverage.unresolved_blocks} phần nội dung chưa gắn bài.` : "") +
-          " Hãy kiểm tra từng đề và hình.");
+          " Bài rõ nguồn được đối chiếu tự động; bài có cảnh báo vẫn cần xử lý.");
       await queryClient.invalidateQueries({ queryKey: ["teacher", "marker-sources", documentId] });
     },
     onError: (processingError) => setError(getApiErrorMessage(processingError, "Chưa xử lý được bài nguồn.")),
@@ -398,7 +398,7 @@ export function DocumentsWorkspace() {
         </button>
         {Boolean(sourcesQuery.data?.length) && <div className="flex flex-wrap gap-2">
           {sourcesQuery.data?.map((source, index) => <button key={source.exercise_id} type="button" className="secondary-button" onClick={() => { setReviewExerciseId(source.exercise_id); setLoadedSourceAssetIds([]); prepareSource.reset(); materializeSource.reset(); }} aria-pressed={reviewExerciseId === source.exercise_id}>
-            {source.source_label || `Bài ${index + 1}`} · Vị trí {source.source_order + 1} · {source.fidelity_status === "verified" ? "Đã duyệt nguồn" : "Cần duyệt"}
+            {source.source_label || `Bài ${index + 1}`} · Vị trí {source.source_order + 1} · {source.fidelity_status === "verified" ? "Nguồn đã đối chiếu" : "Nguồn có cảnh báo"}
           </button>)}
         </div>}
         {selectedSource && <article className="document-card">
