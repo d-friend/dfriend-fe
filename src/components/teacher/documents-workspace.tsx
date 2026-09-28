@@ -39,7 +39,6 @@ export function DocumentsWorkspace() {
   const [success, setSuccess] = useState("");
   const [reviewDocumentId, setReviewDocumentId] = useState("");
   const [reviewExerciseId, setReviewExerciseId] = useState("");
-  const [loadedSourceAssetIds, setLoadedSourceAssetIds] = useState<string[]>([]);
   const [processedSourceBatches, setProcessedSourceBatches] = useState(0);
   const [bankConcept, setBankConcept] = useState("");
   const [bankSkillId, setBankSkillId] = useState("");
@@ -48,7 +47,11 @@ export function DocumentsWorkspace() {
   const curriculumQuery = useQuery({ queryKey: ["curriculum"], queryFn: teacherApi.curriculum, staleTime: 5 * 60 * 1000 });
   const catalogVersions = Array.from(new Set((curriculumQuery.data || []).map((item) => item.taxonomy_version)));
   const catalogVersion = catalogVersions.length === 1 ? catalogVersions[0] : undefined;
-  const documentsQuery = useQuery({ queryKey: ["teacher", "documents", catalogVersion], queryFn: () => teacherApi.documents(catalogVersion as number), enabled: Boolean(catalogVersion), refetchInterval: (query) => query.state.data?.some((item) => item.extractionJobId ? ["pending_dispatch", "dispatching", "queued", "running"].includes(item.extractionStatus || "") : item.indexStatus === "pending" || item.indexStatus === "indexing") ? 5000 : false });
+  const documentsQuery = useQuery({ queryKey: ["teacher", "documents", catalogVersion], queryFn: () => teacherApi.documents(catalogVersion as number), enabled: Boolean(catalogVersion), refetchInterval: (query) => query.state.data?.some((item) =>
+    (item.extractionJobId && ["pending_dispatch", "dispatching", "queued", "running"].includes(item.extractionStatus || "")) ||
+    ((item.ingestionMode !== "marker" || item.extractionStatus === "succeeded") &&
+      (item.indexStatus === "pending" || item.indexStatus === "indexing"))
+  ) ? 5000 : false });
   const sourcesQuery = useQuery({
     queryKey: ["teacher", "marker-sources", reviewDocumentId, catalogVersion],
     queryFn: () => teacherApi.markerSourceExercises(reviewDocumentId, catalogVersion as number),
@@ -187,17 +190,6 @@ export function DocumentsWorkspace() {
       await queryClient.invalidateQueries({ queryKey: ["teacher", "marker-sources", documentId] });
     },
     onError: (processingError) => setError(getApiErrorMessage(processingError, "Chưa xử lý được bài nguồn.")),
-  });
-  const verifySource = useMutation({
-    mutationFn: (source: MarkerSourceExercise) => teacherApi.verifyMarkerSourceExercise(
-      reviewDocumentId, source.exercise_id, source.content_hash, catalogVersion as number,
-    ),
-    onSuccess: async () => {
-      setError("");
-      setSuccess("Đã xác nhận đề và hình nguồn. Bây giờ có thể chuẩn bị lời giải.");
-      await queryClient.invalidateQueries({ queryKey: ["teacher", "marker-sources", reviewDocumentId] });
-    },
-    onError: (reviewError) => setError(getApiErrorMessage(reviewError, "Chưa thể xác nhận bài nguồn.")),
   });
   const prepareSource = useMutation({
     mutationFn: (source: MarkerSourceExercise) => teacherApi.prepareMarkerSourceExercise(
@@ -369,14 +361,13 @@ export function DocumentsWorkspace() {
                 <button type="button" className="document-marker-action" onClick={() => {
                   setReviewDocumentId(document.documentId);
                   setReviewExerciseId("");
-                  setLoadedSourceAssetIds([]);
                   prepareSource.reset();
                   materializeSource.reset();
                   setBankConcept(document.concept || "");
                   setBankSkillId("");
                 }}>Xem bài và hình đã xử lý</button>
               )}
-              <footer><span>{document.ingestionMode === "marker" ? document.extractionJobId ? documentExtractionLabel(document.extractionStatus) : "Chưa xếp hàng trích xuất" : documentIndexLabel(document.indexStatus)} · {formatDate(document.createdAt)}</span><div>{document.previewUrl && <a className="icon-button" href={document.previewUrl} target="_blank" rel="noreferrer" aria-label="Xem tài liệu"><ArrowSquareOut size={16} /></a>}{document.ingestionMode !== "marker" && (document.indexStatus === "failed" || document.indexStatus === "needs_manual") && <button className="icon-button" disabled={retryIndex.isPending} onClick={() => retryIndex.mutate(document.documentId)} aria-label="Lập chỉ mục lại"><ArrowsClockwise size={16} /></button>}<button className="icon-button" onClick={() => { if (window.confirm("Xóa tài liệu khỏi kho?")) remove.mutate(document.documentId); }} aria-label="Xóa tài liệu"><Trash size={16} /></button></div></footer>
+              <footer><span>{document.ingestionMode === "marker" ? `${document.extractionJobId ? documentExtractionLabel(document.extractionStatus) : "Chưa xếp hàng trích xuất"} · Chỉ mục: ${documentIndexLabel(document.indexStatus)}` : documentIndexLabel(document.indexStatus)} · {formatDate(document.createdAt)}</span><div>{document.previewUrl && <a className="icon-button" href={document.previewUrl} target="_blank" rel="noreferrer" aria-label="Xem tài liệu"><ArrowSquareOut size={16} /></a>}{document.ingestionMode !== "marker" && (document.indexStatus === "failed" || document.indexStatus === "needs_manual") && <button className="icon-button" disabled={retryIndex.isPending} onClick={() => retryIndex.mutate(document.documentId)} aria-label="Lập chỉ mục lại"><ArrowsClockwise size={16} /></button>}<button className="icon-button" onClick={() => { if (window.confirm("Xóa tài liệu khỏi kho?")) remove.mutate(document.documentId); }} aria-label="Xóa tài liệu"><Trash size={16} /></button></div></footer>
             </article>
           ))}
         </div>
@@ -387,7 +378,7 @@ export function DocumentsWorkspace() {
       {reviewDocumentId && <section className="upload-panel" aria-label="Duyệt bài trích xuất">
         <div className="upload-copy">
           <h2>Bài trích xuất từ Marker</h2>
-          <p>Duyệt đề và hình trước khi chuẩn bị lời giải. Bước này chưa xác nhận đáp án đúng.</p>
+          <p>Đề và hình được hệ thống đối chiếu với bản trích xuất. Bài chưa rõ nguồn sẽ không được dùng để soạn lesson.</p>
           <button type="button" className="text-button" onClick={() => { setReviewDocumentId(""); setReviewExerciseId(""); }}>Đóng</button>
         </div>
         {sourcesQuery.isLoading && <p>Đang tải bài nguồn…</p>}
@@ -397,7 +388,7 @@ export function DocumentsWorkspace() {
           {processSources.isPending ? `Đang xử lý bài nguồn · ${processedSourceBatches} đợt xong` : sourcesQuery.data?.length ? "Tiếp tục xử lý nguồn" : "Xử lý bài nguồn"}
         </button>
         {Boolean(sourcesQuery.data?.length) && <div className="flex flex-wrap gap-2">
-          {sourcesQuery.data?.map((source, index) => <button key={source.exercise_id} type="button" className="secondary-button" onClick={() => { setReviewExerciseId(source.exercise_id); setLoadedSourceAssetIds([]); prepareSource.reset(); materializeSource.reset(); }} aria-pressed={reviewExerciseId === source.exercise_id}>
+          {sourcesQuery.data?.map((source, index) => <button key={source.exercise_id} type="button" className="secondary-button" onClick={() => { setReviewExerciseId(source.exercise_id); prepareSource.reset(); materializeSource.reset(); }} aria-pressed={reviewExerciseId === source.exercise_id}>
             {source.source_label || `Bài ${index + 1}`} · Vị trí {source.source_order + 1} · {source.fidelity_status === "verified" ? "Nguồn đã đối chiếu" : "Nguồn có cảnh báo"}
           </button>)}
         </div>}
@@ -410,14 +401,13 @@ export function DocumentsWorkspace() {
           {sourceAssetsQuery.data?.map(({ asset, access }) => <figure key={asset.asset_id}>
             {/* Owner-scoped signed URLs must load directly, without an image proxy. */}
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={access.access_url} alt={`Hình ${asset.order + 1} của ${selectedSource.source_label || "bài nguồn"}`} className="max-h-80 max-w-full object-contain" onLoad={() => setLoadedSourceAssetIds((current) => current.includes(asset.asset_id) ? current : [...current, asset.asset_id])} onError={() => { setLoadedSourceAssetIds((current) => current.filter((id) => id !== asset.asset_id)); setError("Chưa tải được hình nguồn. Hãy tải lại hình trước khi xác nhận."); }} />
+            <img src={access.access_url} alt={`Hình ${asset.order + 1} của ${selectedSource.source_label || "bài nguồn"}`} className="max-h-80 max-w-full object-contain" onError={() => setError("Chưa tải được hình nguồn. Hãy thử tải lại hình.")} />
             <figcaption>{asset.audience === "private_solution" ? "Hình lời giải, chỉ giáo viên thấy" : "Hình đề bài"} · {asset.target}</figcaption>
           </figure>)}
-          {Boolean(sourceAssetsQuery.data?.length) && <button type="button" className="text-button" onClick={() => { setLoadedSourceAssetIds([]); sourceAssetsQuery.refetch(); }}>Tải lại hình</button>}
+          {Boolean(sourceAssetsQuery.data?.length) && <button type="button" className="text-button" onClick={() => sourceAssetsQuery.refetch()}>Tải lại hình</button>}
           {selectedSource.source_answer?.map((answer, index) => <details key={`answer-${index}`}><summary>Đáp án trong tài liệu</summary><MathContent answer>{answer.content}</MathContent></details>)}
           {selectedSource.source_solution?.map((solution, index) => <details key={`solution-${index}`}><summary>Lời giải trong tài liệu</summary><MathContent>{solution.content}</MathContent></details>)}
-          {selectedSource.issues.some((issue) => issue !== "source_review_required") && <p className="document-index-help">Cần sửa nguồn trước khi duyệt: {selectedSource.issues.join(", ")}</p>}
-          {selectedSource.fidelity_status !== "verified" && selectedSource.issues.every((issue) => issue === "source_review_required") && <button type="button" className="secondary-button" disabled={verifySource.isPending || sourceAssetsQuery.isFetching || sourceAssetsQuery.isError || !sourceAssetsQuery.isSuccess || selectedSource.assets.some((asset) => !loadedSourceAssetIds.includes(asset.asset_id))} onClick={() => verifySource.mutate(selectedSource)}>{verifySource.isPending ? "Đang xác nhận…" : selectedSource.assets.length ? "Xác nhận đề và hình đúng nguồn" : "Xác nhận đề đúng nguồn"}</button>}
+          {selectedSource.fidelity_status !== "verified" && <p className="document-index-help">Bài này chưa đủ tin cậy để dùng tự động: {selectedSource.issues.join(", ") || "chưa xác định được vị trí đề và hình"}.</p>}
           {selectedSource.fidelity_status === "verified" && <button type="button" className="primary-button" disabled={prepareSource.isPending} onClick={() => prepareSource.mutate(selectedSource)}>{prepareSource.isPending ? selectedSource.assets.length ? "Đang đọc hình và kiểm tra lời giải…" : "Đang kiểm tra lời giải…" : "Chuẩn bị lời giải một lần"}</button>}
           {prepareSource.data?.source_exercise_id === selectedSource.exercise_id && <div>
             <h4>Lời giải đã chuẩn bị</h4>

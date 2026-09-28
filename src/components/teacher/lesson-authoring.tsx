@@ -93,6 +93,7 @@ export function LessonAuthoring() {
   const [lessonKind, setLessonKind] = useState<"normal" | "targeted_review">("normal");
   const [reviewSkills, setReviewSkills] = useState<string[]>([]);
   const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
+  const [allowGenerated, setAllowGenerated] = useState(false);
   const [classIds, setClassIds] = useState<string[]>([]);
   const [deadline, setDeadline] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -143,10 +144,11 @@ export function LessonAuthoring() {
       taxonomyVersion: taxonomyVersion || null,
       lessonKind,
       skillIds: [...selectedSkills].sort(),
+      allowGenerated,
       classIds: [...classIds].sort(),
       draftExerciseId,
     }),
-    [classIds, concept, description, draftExerciseId, lessonGoal, lessonKind, selectedSkills, subject, taxonomyVersion, title, topic],
+    [allowGenerated, classIds, concept, description, draftExerciseId, lessonGoal, lessonKind, selectedSkills, subject, taxonomyVersion, title, topic],
   );
 
   useEffect(() => {
@@ -171,6 +173,7 @@ export function LessonAuthoring() {
           setConcept(String(saved.concept || ""));
           setClassIds(Array.isArray(saved.classIds) ? saved.classIds.map(String) : []);
           setSelectedSkills(Array.isArray(saved.selectedSkills) ? saved.selectedSkills.map(String).slice(0, 4) : []);
+          setAllowGenerated(saved.allowGenerated === true);
           setLessonKind(saved.lessonKind === "targeted_review" ? "targeted_review" : "normal");
           setDeadline(saved.deadline ? String(saved.deadline) : defaultDeadline());
           if (saved.draftExerciseId) setDraftExerciseId(String(saved.draftExerciseId));
@@ -230,9 +233,9 @@ export function LessonAuthoring() {
     if (!storageReady || !storageKey) return;
     window.localStorage.setItem(
       storageKey,
-      JSON.stringify({ title, description, lessonGoal, subject, topic, concept, selectedSkills, lessonKind, classIds, deadline, draftExerciseId, activeJobId, activeJobIdentity }),
+      JSON.stringify({ title, description, lessonGoal, subject, topic, concept, selectedSkills, allowGenerated, lessonKind, classIds, deadline, draftExerciseId, activeJobId, activeJobIdentity }),
     );
-  }, [storageReady, storageKey, title, description, lessonGoal, subject, topic, concept, selectedSkills, lessonKind, classIds, deadline, draftExerciseId, activeJobId, activeJobIdentity]);
+  }, [storageReady, storageKey, title, description, lessonGoal, subject, topic, concept, selectedSkills, allowGenerated, lessonKind, classIds, deadline, draftExerciseId, activeJobId, activeJobIdentity]);
 
   async function begin(event: FormEvent) {
     event.preventDefault();
@@ -351,6 +354,7 @@ export function LessonAuthoring() {
       form1.append("explicitSkillIds", JSON.stringify(lessonKind === "targeted_review" ? reviewSkills : selectedSkills));
       form1.append("classIds", JSON.stringify(classIds));
       form1.append("exerciseSourcePolicy", "source_and_bank");
+      form1.append("allowGenerated", String(allowGenerated));
       if (draftExerciseId) form1.append("lessonId", draftExerciseId);
       const queued = await teacherApi.generateLesson1(form1);
       if (queued.jobId) {
@@ -362,7 +366,7 @@ export function LessonAuthoring() {
         if (storageKey) {
           window.localStorage.setItem(
             storageKey,
-            JSON.stringify({ title, description, lessonGoal, subject, topic, concept, selectedSkills, lessonKind, classIds, deadline, draftExerciseId, activeJobId: nextJobId, activeJobIdentity: generationIdentity }),
+            JSON.stringify({ title, description, lessonGoal, subject, topic, concept, selectedSkills, allowGenerated, lessonKind, classIds, deadline, draftExerciseId, activeJobId: nextJobId, activeJobIdentity: generationIdentity }),
           );
         }
         router.push(
@@ -527,7 +531,7 @@ export function LessonAuthoring() {
             </section>
 
             <div className="studio-submit-bar">
-              <span>Hệ thống tự chọn bài gốc đã kiểm tra từ tài liệu Marker và bài có sẵn trong kho. Slot thiếu sẽ hiện ở review; không tự soạn bài mới.</span>
+              <label><input type="checkbox" checked={allowGenerated} onChange={(event) => setAllowGenerated(event.target.checked)} /> Cho phép AI soạn và kiểm tra các slot còn thiếu sau khi dùng kho bài và tài liệu.</label>
               <button className="primary-button authoring-submit" type="submit" disabled={phase === "precheck"}><Sparkle size={17} weight="fill" /> {phase === "precheck" ? "Đang kiểm tra nguồn bài" : "Kiểm tra và tạo bài"}<ArrowRight size={16} /></button>
             </div>
           </div>

@@ -450,6 +450,7 @@ function LessonPlanCard({ plan, classId }: { plan: CopilotLessonPlan; classId: s
       </fieldset>
       <div className="lesson-plan-footer">
         <p>Trong đề xuất: Ngân hàng {plan.bankProblems} bài <i>·</i> Tài liệu {plan.documentUnits} phần</p>
+        {plan.confirmable === true && <label className="lesson-plan-consent"><input type="checkbox" checked={requiresGenerationConsent} onChange={(event) => setRequiresGenerationConsent(event.target.checked)} /> Cho phép AI soạn các slot còn thiếu sau khi dùng kho bài và tài liệu</label>}
         {plan.confirmable === true && (
           <button
             className="primary-button"
@@ -462,7 +463,7 @@ function LessonPlanCard({ plan, classId }: { plan: CopilotLessonPlan; classId: s
           </button>
         )}
       </div>
-      {requiresGenerationConsent && <p className="lesson-plan-consent"><WarningCircle size={16} /> {consentDetail || "Một số kỹ năng chưa có bài sẵn."} Nếu tài liệu Marker phù hợp chưa có bài được duyệt, bài học sẽ chờ bạn duyệt nguồn. AI chỉ soạn khi không có tài liệu phù hợp.</p>}
+      {requiresGenerationConsent && <p className="lesson-plan-consent"><WarningCircle size={16} /> {consentDetail || "AI chỉ soạn sau khi kho bài và nguồn đủ điều kiện không lấp được slot."} Bài AI soạn vẫn phải qua kiểm tra và review bài học.</p>}
       {plan.confirmable === true && !classId && <p className="lesson-plan-hint">Chọn một lớp ở mục Ngữ cảnh để tiếp tục.</p>}
       {confirm.isError && !generationConsentRequirement(confirm.error) && <p className="message-error"><WarningCircle size={16} /> {getApiErrorMessage(confirm.error, "Chưa thể tạo bản nháp từ kế hoạch này.")}</p>}
     </section>
