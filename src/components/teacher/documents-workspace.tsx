@@ -367,7 +367,7 @@ export function DocumentsWorkspace() {
                   setBankSkillId("");
                 }}>Xem bài và hình đã xử lý</button>
               )}
-              <footer><span>{document.ingestionMode === "marker" ? `${document.extractionJobId ? documentExtractionLabel(document.extractionStatus) : "Chưa xếp hàng trích xuất"} · Chỉ mục: ${documentIndexLabel(document.indexStatus)}` : documentIndexLabel(document.indexStatus)} · {formatDate(document.createdAt)}</span><div>{document.previewUrl && <a className="icon-button" href={document.previewUrl} target="_blank" rel="noreferrer" aria-label="Xem tài liệu"><ArrowSquareOut size={16} /></a>}{document.ingestionMode !== "marker" && (document.indexStatus === "failed" || document.indexStatus === "needs_manual") && <button className="icon-button" disabled={retryIndex.isPending} onClick={() => retryIndex.mutate(document.documentId)} aria-label="Lập chỉ mục lại"><ArrowsClockwise size={16} /></button>}<button className="icon-button" onClick={() => { if (window.confirm("Xóa tài liệu khỏi kho?")) remove.mutate(document.documentId); }} aria-label="Xóa tài liệu"><Trash size={16} /></button></div></footer>
+              <footer><span>{document.ingestionMode === "marker" ? `${document.extractionJobId ? documentExtractionLabel(document.extractionStatus) : "Chưa xếp hàng trích xuất"} · Chỉ mục: ${documentIndexLabel(document.indexStatus)}` : documentIndexLabel(document.indexStatus)} · {formatDate(document.createdAt)}</span><div>{document.previewUrl && <a className="icon-button" href={document.previewUrl} target="_blank" rel="noreferrer" aria-label="Xem tài liệu"><ArrowSquareOut size={16} /></a>}{(document.ingestionMode !== "marker" || document.extractionStatus === "succeeded") && (document.indexStatus === "failed" || document.indexStatus === "needs_manual") && <button className="icon-button" disabled={retryIndex.isPending} onClick={() => retryIndex.mutate(document.documentId)} aria-label="Lập chỉ mục lại"><ArrowsClockwise size={16} /></button>}<button className="icon-button" onClick={() => { if (window.confirm("Xóa tài liệu khỏi kho?")) remove.mutate(document.documentId); }} aria-label="Xóa tài liệu"><Trash size={16} /></button></div></footer>
             </article>
           ))}
         </div>
@@ -459,7 +459,7 @@ function documentIndexLabel(status: string) {
 }
 
 function documentExtractionLabel(status: string | null | undefined) {
-  if (status === "succeeded") return "Đã trích xuất · Chưa xử lý bài tập";
+  if (status === "succeeded") return "Đã trích xuất";
   if (status === "partial") return "Trích xuất một phần · Cần kiểm tra";
   if (status === "failed") return "Trích xuất thất bại";
   if (status === "budget_exhausted") return "Đang chờ ngân sách";
@@ -470,6 +470,7 @@ function documentExtractionLabel(status: string | null | undefined) {
 
 function documentIndexHelp(summary?: Record<string, number>) {
   if (summary?.requires_reindex) return "Bộ đọc tài liệu đã được cập nhật. Bấm Lập chỉ mục lại để dùng nguồn này.";
+  if (summary?.source_needs_review) return `${summary.source_needs_review} bài hoặc hình chưa xác định được vị trí an toàn; các bài rõ ràng được lập chỉ mục riêng.`;
   const total = Number(summary?.total || 0);
   if (total > 0) {
     return `Đã đọc được ${total} mục, nhưng chưa gắn đủ chắc vào kỹ năng. Hãy kiểm tra taxonomy hoặc thử lập chỉ mục lại.`;
