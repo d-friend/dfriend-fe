@@ -453,7 +453,7 @@ function formatDate(value: string) {
 
 function documentIndexLabel(status: string) {
   if (status === "ready") return "Sẵn sàng dùng";
-  if (status === "needs_manual") return "Cần kiểm tra tài liệu";
+  if (status === "needs_manual") return "Chưa có bài đủ chắc để dùng";
   if (status === "failed") return "Chưa thể lập chỉ mục";
   return "Đang lập chỉ mục";
 }
@@ -470,10 +470,15 @@ function documentExtractionLabel(status: string | null | undefined) {
 
 function documentIndexHelp(summary?: Record<string, number>) {
   if (summary?.requires_reindex) return "Bộ đọc tài liệu đã được cập nhật. Bấm Lập chỉ mục lại để dùng nguồn này.";
-  if (summary?.source_needs_review) return `${summary.source_needs_review} bài hoặc hình chưa xác định được vị trí an toàn; các bài rõ ràng được lập chỉ mục riêng.`;
-  const total = Number(summary?.total || 0);
-  if (total > 0) {
-    return `Đã đọc được ${total} mục, nhưng chưa gắn đủ chắc vào kỹ năng. Hãy kiểm tra taxonomy hoặc thử lập chỉ mục lại.`;
+  const indexed = Number(summary?.indexed ?? summary?.total ?? 0);
+  if (indexed > 0 && Number(summary?.eligible || 0) === 0) {
+    return `Đã lập chỉ mục ${indexed} mục, nhưng chưa bài nào đủ chắc để dùng tự động. Hệ thống sẽ ưu tiên ngân hàng bài; chỉ tạo bài mới khi bạn cho phép.`;
+  }
+  if (summary?.source_needs_review) {
+    return `${summary.source_needs_review} bài hoặc hình chưa xác định được vị trí an toàn nên hệ thống tự bỏ qua; các bài rõ ràng được lập chỉ mục riêng.`;
+  }
+  if (indexed > 0) {
+    return `Đã lập chỉ mục ${indexed} mục, nhưng chưa gắn đủ chắc vào kỹ năng.`;
   }
   return "Không tìm thấy nội dung chữ có thể dùng. Hãy kiểm tra tệp rồi tải lại.";
 }
