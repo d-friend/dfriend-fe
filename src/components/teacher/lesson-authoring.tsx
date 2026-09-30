@@ -124,11 +124,15 @@ export function LessonAuthoring() {
   const concepts = useMemo(() => topics.find((item) => item.value === topic)?.concepts || [], [topics, topic]);
   const taxonomyVersion = curriculum.data?.find((item) => item.value === subject)?.taxonomy_version;
   const availableSkills = useQuery({ queryKey: ["curriculum", "skills", subject, topic, concept, taxonomyVersion], queryFn: () => teacherApi.curriculumSkills(subject, topic, concept, taxonomyVersion as number), enabled: Boolean(subject && topic && concept && taxonomyVersion), staleTime: Infinity });
+  const currentClassIds = useMemo(() => {
+    const available = new Set((classes.data || []).map((item) => item.class_id));
+    return classIds.filter((id) => available.has(id));
+  }, [classIds, classes.data]);
   const studioReadyCount = [
     title.trim(),
     subject && topic && concept,
     selectedSkills.length,
-    classIds.length,
+    currentClassIds.length,
   ].filter(Boolean).length;
   const storageKey = me.data?.id
     ? `teacher:lesson-draft-form:v3:${me.data.id}${reportId ? `:report:${reportId}` : ""}`
@@ -145,10 +149,10 @@ export function LessonAuthoring() {
       lessonKind,
       skillIds: [...selectedSkills].sort(),
       allowGenerated,
-      classIds: [...classIds].sort(),
+      classIds: [...currentClassIds].sort(),
       draftExerciseId,
     }),
-    [allowGenerated, classIds, concept, description, draftExerciseId, lessonGoal, lessonKind, selectedSkills, subject, taxonomyVersion, title, topic],
+    [allowGenerated, currentClassIds, concept, description, draftExerciseId, lessonGoal, lessonKind, selectedSkills, subject, taxonomyVersion, title, topic],
   );
 
   useEffect(() => {
@@ -233,13 +237,17 @@ export function LessonAuthoring() {
     if (!storageReady || !storageKey) return;
     window.localStorage.setItem(
       storageKey,
-      JSON.stringify({ title, description, lessonGoal, subject, topic, concept, selectedSkills, allowGenerated, lessonKind, classIds, deadline, draftExerciseId, activeJobId, activeJobIdentity }),
+      JSON.stringify({ title, description, lessonGoal, subject, topic, concept, selectedSkills, allowGenerated, lessonKind, classIds: classes.isSuccess ? currentClassIds : classIds, deadline, draftExerciseId, activeJobId, activeJobIdentity }),
     );
-  }, [storageReady, storageKey, title, description, lessonGoal, subject, topic, concept, selectedSkills, allowGenerated, lessonKind, classIds, deadline, draftExerciseId, activeJobId, activeJobIdentity]);
+  }, [storageReady, storageKey, title, description, lessonGoal, subject, topic, concept, selectedSkills, allowGenerated, lessonKind, classIds, currentClassIds, classes.isSuccess, deadline, draftExerciseId, activeJobId, activeJobIdentity]);
 
   async function begin(event: FormEvent) {
     event.preventDefault();
     setError("");
+    if (!classes.isSuccess) {
+      setError("Chưa tải được danh sách lớp. Vui lòng thử lại trước khi tạo bài.");
+      return;
+    }
     const resumableJobId = activeJobIdentity === generationIdentity ? activeJobId : "";
     if (activeJobId && !resumableJobId) {
       setActiveJobId("");
@@ -286,7 +294,7 @@ export function LessonAuthoring() {
         }
       }
     }
-    if (!title.trim() || !subject || !topic || !concept || !taxonomyVersion || !classIds.length || !selectedSkills.length) {
+    if (!title.trim() || !subject || !topic || !concept || !taxonomyVersion || !currentClassIds.length || !selectedSkills.length) {
       setError("Điền tên bài, taxonomy, ít nhất một kỹ năng và một lớp.");
       return;
     }
@@ -352,7 +360,7 @@ export function LessonAuthoring() {
       form1.append("taxonomyVersion", String(taxonomyVersion));
       form1.append("lessonKind", lessonKind);
       form1.append("explicitSkillIds", JSON.stringify(lessonKind === "targeted_review" ? reviewSkills : selectedSkills));
-      form1.append("classIds", JSON.stringify(classIds));
+      form1.append("classIds", JSON.stringify(currentClassIds));
       form1.append("exerciseSourcePolicy", "source_and_bank");
       form1.append("allowGenerated", String(allowGenerated));
       if (draftExerciseId) form1.append("lessonId", draftExerciseId);
@@ -366,7 +374,7 @@ export function LessonAuthoring() {
         if (storageKey) {
           window.localStorage.setItem(
             storageKey,
-            JSON.stringify({ title, description, lessonGoal, subject, topic, concept, selectedSkills, allowGenerated, lessonKind, classIds, deadline, draftExerciseId, activeJobId: nextJobId, activeJobIdentity: generationIdentity }),
+            JSON.stringify({ title, description, lessonGoal, subject, topic, concept, selectedSkills, allowGenerated, lessonKind, classIds: currentClassIds, deadline, draftExerciseId, activeJobId: nextJobId, activeJobIdentity: generationIdentity }),
           );
         }
         router.push(
@@ -434,7 +442,7 @@ export function LessonAuthoring() {
     setGenerationStep("Đang hoàn thiện bộ bài tập và gắn vào lớp");
     const form2 = new FormData();
     form2.append("draftExerciseId", nextDraftId);
-    form2.append("classIds", JSON.stringify(classIds));
+    form2.append("classIds", JSON.stringify(currentClassIds));
     await teacherApi.generateLesson2(form2);
     setActiveJobId("");
     setActiveJobIdentity("");
