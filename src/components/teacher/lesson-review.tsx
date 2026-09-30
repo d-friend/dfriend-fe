@@ -343,7 +343,7 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
 
       {isPublished && <div className="published-review-notice" role="status"><CheckCircle size={22} weight="fill" /><div><strong>Bài học đã được xuất bản</strong><p>Đây là bản nội dung giáo viên đã duyệt và gửi cho học sinh.</p></div></div>}
       {!isPublished && mixedSources && sourceDocumentCount > 0 && <div className="draft-source-notice" role="status"><WarningCircle size={21} /><div><strong>Nguồn bài tập</strong><p>{sourceSummary?.countsUpdatedAfterGeneration === true
-        ? `Đã lập chỉ mục ${sourceSummary.indexedUnitCount ?? 0} nhóm; ${sourceSummary.matchingUnitCount ?? 0} nhóm khớp kỹ năng. Có ${sourceSummary.preparedCount ?? 0} bài nguồn đã kiểm tra trong kho; lesson dùng ${sourceSummary.selectedCount ?? 0} bài nguồn và ${sourceSummary.generatedCount ?? 0} bài AI soạn.`
+        ? `Đã lập chỉ mục ${sourceSummary.indexedUnitCount ?? 0} nhóm; ${sourceSummary.taxonomyCandidateCount ?? sourceSummary.matchingUnitCount ?? 0} nhóm được xem xét theo taxonomy${sourceSummary.autoEligibleUnitCount != null ? `, trong đó ${sourceSummary.autoEligibleUnitCount} nhóm có độ tin cậy cao` : ""}. Có ${sourceSummary.preparedCount ?? 0} bài nguồn đã kiểm tra trong kho; lesson dùng ${sourceSummary.selectedCount ?? 0} bài nguồn và ${sourceSummary.generatedCount ?? 0} bài AI soạn.`
         : `Lesson sử dụng kho bài và tài liệu được tìm tự động. Số liệu chuẩn bị bài trước khi tạo lesson không phản ánh kết quả cuối cùng.`}</p></div></div>}
 
       <div className="draft-review-shell">
