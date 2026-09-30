@@ -157,6 +157,9 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
     staleTime: 0,
     refetchOnMount: "always",
   });
+  const incompleteSourceBlocker = readinessQuery.data?.blockers.find(
+    (item) => item.code === "source_content_incomplete",
+  );
   const pdfArtifactQuery = useQuery({
     queryKey: ["teacher", "draft", lessonId, "full-content-pdf", taxonomyVersion, revision],
     queryFn: () => teacherApi.lessonPdfArtifact(lessonId, revision, taxonomyVersion),
@@ -332,7 +335,7 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
           {!isPublished && reviewedSourcesOnly && poolDeficitCount > 0 && <button className="secondary-button" onClick={() => router.push("/teacher/documents")} disabled={reviewMutationPending}>Kiểm tra bài nguồn</button>}
           {!isPublished && reviewedSourcesOnly && poolDeficitCount > 0 && generationJobId && <button className="secondary-button" onClick={() => retryMarkerPool.mutate()} disabled={reviewMutationPending}>{retryMarkerPool.isPending ? <CircleNotch className="animate-spin" size={16} /> : <ArrowsClockwise size={16} />} {mixedSources ? "Tìm lại từ nguồn và kho" : "Thử lại từ bài gốc"}</button>}
           {!isPublished && !reviewedSourcesOnly && poolDeficitCount > 0 && <button className="secondary-button" onClick={() => completePool.mutate()} disabled={reviewMutationPending}>{completePool.isPending ? <CircleNotch className="animate-spin" size={16} /> : <ArrowsClockwise size={16} />} Bù {poolDeficitCount} bài còn thiếu</button>}
-          {!isPublished && !approved && <button className="secondary-button" onClick={() => approve.mutate()} disabled={reviewMutationPending || !hasCompleteArc || rejected.size > 0}>{approve.isPending ? <CircleNotch className="animate-spin" size={16} /> : <Check size={16} />} Duyệt arc sẵn sàng</button>}
+          {!isPublished && !approved && <button className="secondary-button" onClick={() => approve.mutate()} disabled={reviewMutationPending || !hasCompleteArc || rejected.size > 0 || Boolean(incompleteSourceBlocker)}>{approve.isPending ? <CircleNotch className="animate-spin" size={16} /> : <Check size={16} />} Duyệt arc sẵn sàng</button>}
           {!followUp && <button className="secondary-button" disabled={pdfDisabled || pdfArtifactQuery.isLoading} onClick={handlePdfAction}>{pdfGenerating ? <CircleNotch className="animate-spin" size={16} /> : pdfArtifact?.status === "READY" ? <ArrowSquareOut size={16} /> : <FilePdf size={16} />} {pdfGenerating ? "Đang tạo" : pdfArtifact?.status === "READY" ? "Bản học sinh" : pdfArtifact?.status === "FAILED" ? "Thử lại PDF HS" : "Xuất PDF HS"}</button>}
           {!followUp && <button className="secondary-button" disabled={pdfDisabled || teacherPdfArtifactQuery.isLoading} onClick={handleTeacherPdfAction}>{teacherPdfGenerating ? <CircleNotch className="animate-spin" size={16} /> : teacherPdfArtifact?.status === "READY" ? <ArrowSquareOut size={16} /> : <FilePdf size={16} />} {teacherPdfGenerating ? "Đang tạo" : teacherPdfArtifact?.status === "READY" ? "Bản giáo viên" : teacherPdfArtifact?.status === "FAILED" ? "Thử lại PDF GV" : "Xuất PDF GV"}</button>}
           {isPublished ? <button className="primary-button" onClick={() => router.push(selectedClassIds[0] ? `/teacher/classes/${selectedClassIds[0]}?tab=learning-path` : "/teacher/classes")}><ArrowLeft size={16} /> Về lớp học</button> : <button className="primary-button" disabled={publishDisabled} onClick={() => publish.mutate()}><Check size={16} /> {publish.isPending ? "Đang xuất bản" : "Xuất bản"}</button>}
@@ -357,6 +360,7 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
             <p>{goal}</p>
           </header>
           {(error || blockers.length > 0) && <div className="publish-blockers"><WarningCircle size={22} /><div><strong>{error}</strong>{blockers.map((item, index) => <p key={index}>{blockerLabel(item)}</p>)}</div></div>}
+          {incompleteSourceBlocker && <div className="publish-blockers" role="alert"><WarningCircle size={22} /><div><strong>Nguồn bài chưa đủ ký hiệu toán</strong><p>{blockerLabel(incompleteSourceBlocker)}</p></div></div>}
           {signedAssets.isError ? <div className="publish-blockers" role="alert"><WarningCircle size={22} /><div><strong>Chưa tải được hình trong bản nháp.</strong><p>{getApiErrorMessage(signedAssets.error, "Hãy tải lại hình trước khi duyệt bài.")}</p><button type="button" onClick={() => void signedAssets.refetch()}>Tải lại hình</button></div></div> : null}
           {failedReviewAssets.size > 0 && !signedAssets.isError ? <div className="publish-blockers" role="alert"><WarningCircle size={22} /><div><strong>Hình trong bản nháp chưa hiển thị được.</strong><button type="button" onClick={() => { attemptedAssetRefresh.current.clear(); void signedAssets.refetch(); }}>Tải lại hình</button></div></div> : null}
           {notices.length > 0 && <div className="publish-blockers" role="status"><WarningCircle size={22} /><div><strong>Nguồn bài và fallback</strong>{notices.map((notice, index) => <p key={`${notice.code}:${index}`}><b>{noticeLabel(notice.code)}</b>: {notice.detail || "Hãy kiểm tra các bài được đánh dấu trước khi xuất bản."}{(notice.code === "ai_fallback_used" || notice.code === "pool_completed_by_generation" ? notice.count : notice.slotIds.length) ? ` (${notice.code === "ai_fallback_used" || notice.code === "pool_completed_by_generation" ? notice.count : notice.slotIds.length} slot)` : ""}</p>)}</div></div>}
@@ -651,7 +655,7 @@ function blockerLabel(item: Record<string, unknown>) {
   if (code === "unapproved_ai_problems") return "Còn bài AI soạn chưa được duyệt.";
   if (code === "session_coverage_not_guaranteed") return "Chưa bảo đảm mỗi học sinh được đánh giá đủ các kỹ năng đã chọn.";
   if (code === "visual_asset_delivery_unavailable") return "Bài có hình chưa có đường tải ảnh an toàn cho học sinh; chưa thể xuất bản.";
-  if (code === "source_content_incomplete") return "Bài nguồn bị thiếu ký hiệu toán hoặc đáp án không hợp lệ. Hãy thay bài này trước khi xuất bản.";
+  if (code === "source_content_incomplete") return "Bản nháp này chứa bài nguồn bị thiếu ký hiệu toán hoặc đáp án không hợp lệ. Hãy tạo bản nháp mới; các bài lỗi này sẽ bị loại khỏi nguồn dùng cho lần tạo mới.";
   return String(item.message || item.detail || code || "Cần chỉnh sửa bản nháp.");
 }
 
