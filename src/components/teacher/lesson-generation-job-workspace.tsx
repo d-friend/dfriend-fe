@@ -12,6 +12,11 @@ import {
   type LessonGenerationResult,
 } from "@/lib/lesson-generation";
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown> : null;
+}
+
 export function LessonGenerationJobWorkspace({ jobId }: { jobId: string }) {
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -144,7 +149,9 @@ export function LessonGenerationJobWorkspace({ jobId }: { jobId: string }) {
             Đã hoàn thành {partial.generationCompletedSlots || 0}
             {typeof partial.generationTotalSlots === "number" ? `/${partial.generationTotalSlots}` : ""} slot nhưng chưa có arc 4/4. {hasKnowledge ? "Thử lại sẽ giữ nguyên kiến thức và chỉ tạo các slot còn thiếu." : "Thử lại sẽ tạo phần kiến thức rồi tiếp tục các slot còn thiếu."}
           </p>
-          {Boolean(partial.selectedDocumentIds?.length) && typeof partial.sourceCount === "number" && typeof partial.materializedCount === "number" && partial.materializedCount < Math.max(partial.sourceCount, 1) && <p className="lesson-generation-lead">Nguồn Marker: {partial.materializedCount}/{partial.sourceCount} bài phù hợp đã chuẩn bị vào kho. Kiểm tra đề, hình và đáp án trong Kho tài liệu để bổ sung bài đủ điều kiện.</p>}
+          {Boolean(partial.selectedDocumentIds?.length) && <p className="lesson-generation-lead">{asRecord(partial.sourceSummary)?.countsUpdatedAfterGeneration === true
+            ? `Lesson đã dùng ${asRecord(partial.sourceSummary)?.selectedCount ?? 0} bài nguồn đã kiểm tra và ${asRecord(partial.sourceSummary)?.generatedCount ?? 0} bài AI soạn.`
+            : "Tài liệu đã được tìm tự động. Hệ thống tiếp tục dùng kho bài và chuẩn bị bài cho các slot còn thiếu."}</p>}
           <div className="lesson-generation-actions">
             {Boolean(partial.selectedDocumentIds?.length) && <button className="secondary-button" type="button" onClick={() => router.push("/teacher/documents")}>Kiểm tra bài nguồn</button>}
             {Number(partial.generationCompletedSlots || 0) > 0 && <button

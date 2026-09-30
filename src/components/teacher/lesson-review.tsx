@@ -79,16 +79,15 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
   const classes = useQuery({ queryKey: ["teacher", "classes"], queryFn: teacherApi.classes });
   const draft = draftQuery.data;
   const isPublished = published || draft?.status === "published" || Boolean(draft?.published_at);
-  const reviewedSourcesOnly = draft?.exercise_source_policy === "bank_only" ||
-    draft?.exercise_source_policy === "source_and_bank";
+  const automaticAuthoring = draft?.lesson_authoring_version === 1;
+  const reviewedSourcesOnly = !automaticAuthoring && (draft?.exercise_source_policy === "bank_only" ||
+    draft?.exercise_source_policy === "source_and_bank");
   const mixedSources = draft?.exercise_source_policy === "source_and_bank";
   const sourceJobResult = asRecord(generationJobQuery.data?.result) || {};
   const sourceDocumentCount = Array.isArray(sourceJobResult.selectedDocumentIds)
-    ? sourceJobResult.selectedDocumentIds.length : 0;
-  const sourceCount = typeof sourceJobResult.sourceCount === "number"
-    ? sourceJobResult.sourceCount : null;
-  const materializedCount = typeof sourceJobResult.materializedCount === "number"
-    ? sourceJobResult.materializedCount : null;
+    ? sourceJobResult.selectedDocumentIds.length
+    : Array.isArray(draft?.selected_document_ids) ? draft.selected_document_ids.length : 0;
+  const sourceSummary = asRecord(draft?.source_summary) || asRecord(sourceJobResult.sourceSummary);
   const kind = String(draft?.kind || draft?.lesson_kind || "main");
   const followUp = kind === "remedial" || kind === "advanced";
   const review = useMemo(() => normalizeDraftReview(draft), [draft]);
@@ -343,7 +342,9 @@ export function LessonReview({ lessonId }: { lessonId: string }) {
       </header>
 
       {isPublished && <div className="published-review-notice" role="status"><CheckCircle size={22} weight="fill" /><div><strong>Bài học đã được xuất bản</strong><p>Đây là bản nội dung giáo viên đã duyệt và gửi cho học sinh.</p></div></div>}
-      {!isPublished && mixedSources && sourceDocumentCount > 0 && sourceCount !== null && materializedCount !== null && materializedCount < Math.max(sourceCount, 1) && <div className="draft-source-notice" role="status"><WarningCircle size={21} /><div><strong>Nguồn Marker còn bài chưa sẵn sàng</strong><p>Hệ thống nhận diện {sourceCount} bài nguồn trong {sourceDocumentCount} tài liệu; {materializedCount} bài phù hợp đã chuẩn bị vào kho. Bài chưa xác minh hoặc không khớp kỹ năng không được chọn. <button type="button" onClick={() => router.push("/teacher/documents")}>Mở Kho tài liệu</button></p></div></div>}
+      {!isPublished && mixedSources && sourceDocumentCount > 0 && <div className="draft-source-notice" role="status"><WarningCircle size={21} /><div><strong>Nguồn bài tập</strong><p>{sourceSummary?.countsUpdatedAfterGeneration === true
+        ? `Đã lập chỉ mục ${sourceSummary.indexedUnitCount ?? 0} nhóm; ${sourceSummary.matchingUnitCount ?? 0} nhóm khớp kỹ năng. Có ${sourceSummary.preparedCount ?? 0} bài nguồn đã kiểm tra trong kho; lesson dùng ${sourceSummary.selectedCount ?? 0} bài nguồn và ${sourceSummary.generatedCount ?? 0} bài AI soạn.`
+        : `Lesson sử dụng kho bài và tài liệu được tìm tự động. Số liệu chuẩn bị bài trước khi tạo lesson không phản ánh kết quả cuối cùng.`}</p></div></div>}
 
       <div className="draft-review-shell">
         <nav className="draft-review-toc" aria-label="Mục lục bản nháp">

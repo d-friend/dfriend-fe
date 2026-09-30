@@ -93,7 +93,7 @@ export function LessonAuthoring() {
   const [lessonKind, setLessonKind] = useState<"normal" | "targeted_review">("normal");
   const [reviewSkills, setReviewSkills] = useState<string[]>([]);
   const [selectedSkills, setSelectedSkills] = useState<string[]>([]);
-  const [allowGenerated, setAllowGenerated] = useState(false);
+  const allowGenerated = true;
   const [classIds, setClassIds] = useState<string[]>([]);
   const [deadline, setDeadline] = useState("");
   const [file, setFile] = useState<File | null>(null);
@@ -177,7 +177,6 @@ export function LessonAuthoring() {
           setConcept(String(saved.concept || ""));
           setClassIds(Array.isArray(saved.classIds) ? saved.classIds.map(String) : []);
           setSelectedSkills(Array.isArray(saved.selectedSkills) ? saved.selectedSkills.map(String).slice(0, 4) : []);
-          setAllowGenerated(saved.allowGenerated === true);
           setLessonKind(saved.lessonKind === "targeted_review" ? "targeted_review" : "normal");
           setDeadline(saved.deadline ? String(saved.deadline) : defaultDeadline());
           if (saved.draftExerciseId) setDraftExerciseId(String(saved.draftExerciseId));
@@ -539,7 +538,7 @@ export function LessonAuthoring() {
             </section>
 
             <div className="studio-submit-bar">
-              <label><input type="checkbox" checked={allowGenerated} onChange={(event) => setAllowGenerated(event.target.checked)} /> Cho phép AI soạn và kiểm tra các slot còn thiếu sau khi dùng kho bài và tài liệu.</label>
+              <p>Ưu tiên kho bài, tiếp đến tài liệu phù hợp. AI bổ sung hoặc sửa bài khi cần và giải lại để kiểm tra trước khi bạn review.</p>
               <button className="primary-button authoring-submit" type="submit" disabled={phase === "precheck"}><Sparkle size={17} weight="fill" /> {phase === "precheck" ? "Đang kiểm tra nguồn bài" : "Kiểm tra và tạo bài"}<ArrowRight size={16} /></button>
             </div>
           </div>
