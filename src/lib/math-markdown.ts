@@ -1,7 +1,7 @@
 /** Normalise legacy TeX delimiters before remark-math parses the content. */
 export function normalizeMathMarkdown(value: string | null | undefined) {
   if (!value) return "";
-  return value
+  return normalizeMathTransport(value)
     .replace(/\\\[/g, () => "\n$$\n")
     .replace(/\\\]/g, () => "\n$$\n")
     .replace(/\\\(/g, () => "$")
@@ -20,6 +20,28 @@ export function normalizeMathMarkdown(value: string | null | undefined) {
       if (/[^\x00-\x7F]/.test(text) && !/[\\0-9=+*/^_<>()[\]{}|]/.test(text)) return `${prefix}${text}`;
       return match;
     });
+}
+
+/** Repair observed JSON transport escapes within math; preserve prose and row breaks. */
+function normalizeMathTransport(value: string) {
+  const controls: [string, string[]][] = [
+    ["\t", ["theta", "tan", "text", "tau", "times", "tfrac"]],
+    ["\f", ["frac"]], ["\b", ["beta", "begin", "bar", "boxed"]],
+    ["\r", ["right", "rho"]], ["\n", ["nu", "nabla"]],
+    ["\v", ["vec", "varepsilon"]], ["\x07", ["alpha", "approx"]],
+  ];
+  return value.replace(/\$\$([\s\S]*?)\$\$|(?<!\$)\$([^$]*?)\$(?!\$)/g, (_match, display: string | undefined, inline: string) => {
+    let math = display ?? inline;
+    for (const [control, commands] of controls) {
+      for (const command of commands) {
+        math = math.replace(new RegExp(`${control}${command.slice(1)}(?![A-Za-z])`, "g"), () => `\\${command}`);
+      }
+    }
+    math = math.replace(/\\{2,}(?=(?:sin|cos|tan|cot|frac|dfrac|tfrac|sqrt|circ|theta|alpha|beta|gamma|pi|tau|rho|nu|nabla|text|mathrm|operatorname|left|right|cdot|times|approx|leq|geq|neq|angle|triangle|quad|qquad|begin|end|boxed|bar|vec|varepsilon)(?![A-Za-z]))/g, () => "\\");
+    math = math.replace(/(?<=\d)\^\s*circ\b/g, () => "^\\circ");
+    const delimiter = display == null ? "$" : "$$";
+    return `${delimiter}${math}${delimiter}`;
+  });
 }
 
 /** Answers are often returned as bare TeX because the entire field is mathematical. */
