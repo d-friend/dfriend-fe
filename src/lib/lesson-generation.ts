@@ -19,6 +19,7 @@ export type LessonGenerationResult = Record<string, unknown> & {
   generationMissingSlotIds?: string[];
   generationCompleteArcIds?: string[];
   masteryRetryExhausted?: boolean;
+  masteryRetryStopReason?: "no_progress";
   retryAllowed?: boolean;
 };
 

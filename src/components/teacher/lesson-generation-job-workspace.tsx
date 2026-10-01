@@ -145,7 +145,11 @@ export function LessonGenerationJobWorkspace({ jobId }: { jobId: string }) {
           <p className="workspace-kicker">{hasKnowledge && masteryRetryExhausted ? "Phần kiến thức đã được giữ" : "Bản nháp đã được giữ"}</p>
           <h1>{!hasKnowledge ? "Chưa tạo được phần kiến thức" : masteryRetryExhausted ? "Chưa tạo được arc bài tập hoàn chỉnh" : "Còn slot chưa đạt chuẩn"}</h1>
           <p className="lesson-generation-lead">
-            {hasKnowledge && masteryRetryExhausted ? "D-Friend đã thử lại phần bài tập 2 lần. " : ""}
+            {hasKnowledge && masteryRetryExhausted
+              ? partial.masteryRetryStopReason === "no_progress"
+                ? "D-Friend đã dừng tự động thử lại vì lượt vừa rồi không hoàn thành thêm slot nào. "
+                : "D-Friend đã dừng tự động thử lại phần bài tập. "
+              : ""}
             Đã hoàn thành {partial.generationCompletedSlots || 0}
             {typeof partial.generationTotalSlots === "number" ? `/${partial.generationTotalSlots}` : ""} slot nhưng chưa có arc 4/4. {hasKnowledge ? "Thử lại sẽ giữ nguyên kiến thức và chỉ tạo các slot còn thiếu." : "Thử lại sẽ tạo phần kiến thức rồi tiếp tục các slot còn thiếu."}
           </p>
