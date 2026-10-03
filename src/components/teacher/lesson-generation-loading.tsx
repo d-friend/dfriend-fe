@@ -13,8 +13,8 @@ export function LessonGenerationLoading({
   const generationSteps = [
     "Chốt kỹ năng và mục tiêu",
     "Soạn Session 1",
-    lessonKind === "main" ? "Dựng 3 mạch luyện tập" : "Dựng 2 mạch luyện tập",
-    lessonKind === "main" ? "Kiểm tra 12 slot độc lập" : "Kiểm tra 8 slot độc lập",
+    lessonKind === "main" ? "Dựng mạch luyện tập" : "Dựng 2 mạch luyện tập",
+    lessonKind === "main" ? "Kiểm tra từng bài luyện tập" : "Kiểm tra 8 slot độc lập",
     "Lưu bản review",
   ];
   return (
